@@ -114,7 +114,7 @@ def parse_masks(traj, masks, atom_names):
     masks      : list of str
                List of AMBER masks
     atom_names : list of lists
-               Each sublist if a list of atom names
+               Each sublist if a list of atom names (str)
     Returns
     -------
     coords     : list of ndarray, (num_samples, num_atoms, 3)

@@ -234,7 +234,7 @@ class CoulombMatrix(object):
     Class representing a Coulomb Matrix encoder.
     """
 
-    def __init__(self, coords, atnums, residue_id, triu=True, permute_groups=None):
+    def __init__(self, coords, atnums, residue_id="", triu=True, permute_groups=None):
         """
         Arguments
         ---------
@@ -243,7 +243,7 @@ class CoulombMatrix(object):
         atnums          : ndarray, (num_atoms,)
                         Atomic numbers
         residue_ids     : str
-                        Residue ID
+                        Residue ID (only used in progress bar info)
         triu            : bool
                         Whether to encode only the upper triangular part (True) or
                         the whole matrix (False)
