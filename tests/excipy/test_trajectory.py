@@ -79,7 +79,7 @@ def test_parse_ensure_order_z():
     np.testing.assert_allclose(z_ordmask[reorder], z_ordtop)
 
 
-def test_parse_masks():
+def test_masks_not_list():
     """
     Test that `parse_masks` fails when `masks` is not given as a list.
     """
@@ -88,3 +88,17 @@ def test_parse_masks():
     atom_names = ["H3", "H2"]
     with pytest.raises(ValueError):
         parse_masks(traj, masks=masks, atom_names=atom_names)
+
+
+def test_atom_names_not_list():
+    """
+    Test that `parse_masks` fails when `atom_names` is not given as a list.
+    """
+    traj, top = get_ala3_traj()
+    masks = [":1@H3,H2"]
+    atom_names = "H3"
+    with pytest.raises(ValueError):
+        parse_masks(traj, masks=masks, atom_names=atom_names)
+
+
+test_atom_names_not_list()
