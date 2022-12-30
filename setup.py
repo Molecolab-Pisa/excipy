@@ -28,8 +28,6 @@ package_data = {
         "database/models/*",
         "database/models/*/*/*",
         "database/models/*/*.pb",
-#        "examples/*",
-#        "examples/*/*",
     ]
 }
 
@@ -50,7 +48,7 @@ entry_points = {
 setup(
     name="excipy",
     version="1.5.0",
-    author="Edoardo Cignoni, Lorenzo Cupellini, Filippo Lipparini, Carmela Luongo, Benedetta Mennucci",
+    author="Edoardo Cignoni, Lorenzo Cupellini, Benedetta Mennucci",
     author_email="edoardo.cignoni96@gmail.com",
     packages=packages,
     package_data=package_data,
