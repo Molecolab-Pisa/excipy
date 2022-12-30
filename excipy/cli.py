@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 
-
-import os
 import sys
 import numpy as np
-from tqdm import tqdm
 import pytraj as pt
 from argparse import ArgumentParser
 from collections import defaultdict
@@ -12,7 +9,6 @@ from collections import defaultdict
 import excipy
 from excipy.trajectory import parse_masks
 from excipy.descriptors import (
-    get_bond_matrix,
     get_coulomb_matrix,
     get_MM_elec_potential,
     encode_geometry,
@@ -746,7 +742,7 @@ def compute_site_energies(traj, args):
             # We try to obtain the environment TrEsp charges from the output file
             try:
                 env_tresp = load_tresp_charges(args.outfile, kind="env")
-            except KeyError as e:
+            except KeyError:
                 raise RuntimeError(
                     "Environment TrEsp not found. MMPol contribution to the "
                     " site energy is not computable."
@@ -902,7 +898,7 @@ def excipy2exat_block_average(exat_quantities, frames, args):
     to_avg = ["site", "coup", "DipoLen", "DipoVel", "Mag"]
     for key in exat_quantities.keys():
         if key in to_avg:
-            if exat_quantities[key] == None:
+            if exat_quantities[key] is None:
                 print(f": {key} is stored as None: skipping.")
                 pass
             else:
@@ -913,7 +909,7 @@ def excipy2exat_block_average(exat_quantities, frames, args):
         else:
             print(f': Skipping "{key}"')
     print(
-        f": Extracting geometries (xyz) and centers (Cent) from the middle of each block."
+        ": Extracting geometries (xyz) and centers (Cent) from the middle of each block."
     )
     # Coordinates get a separate treatment: we return the one in the middle
     # of the block, to have a meaningful geometry

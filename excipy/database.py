@@ -1,6 +1,5 @@
 import os
 import json
-from collections import namedtuple
 from collections.abc import Iterable
 import numpy as np
 import tensorflow as tf
@@ -208,7 +207,7 @@ def get_identical_atoms(type, convert_to_indeces=True):
             _get_identical_atoms(t, convert_to_indeces=convert_to_indeces) for t in type
         ]
     else:
-        return _get_identical_atoms(t, convert_to_indeces=convert_to_indeces)
+        return _get_identical_atoms(type, convert_to_indeces=convert_to_indeces)
 
 
 def _get_params(type):
@@ -262,7 +261,7 @@ def get_site_model(type, kind):
         path = os.path.join(database_paths.models, f"GPR_{kind}_{type}")
         try:
             return tf.saved_model.load(path)
-        except:
+        except OSError:
             raise DatabaseError(f"Model GPR_{kind}_{type} not found in database.")
     else:
         raise RuntimeError(

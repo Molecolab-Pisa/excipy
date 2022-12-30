@@ -2,10 +2,8 @@ import warnings
 import numpy as np
 import pytraj as pt
 from collections.abc import Iterable
-from tqdm import tqdm
 from .util import ANG2BOHR, pbar
 from .retain_full_residues import retain_full_residues_cy
-import time
 
 
 # =============================================================================
@@ -157,7 +155,9 @@ def get_bond_matrix(coords, top, masks):
     return [_get_bond_matrix(coords=c, top=top, mask=m) for c, m in zip(coords, masks)]
 
 
-def _get_MM_elec_potential(traj, mask, cutoff, frames, turnoff_mask, charges_db, remove_mean):
+def _get_MM_elec_potential(
+    traj, mask, cutoff, frames, turnoff_mask, charges_db, remove_mean
+):
     """
     Get the MM electrostatic potential acting on a single molecule.
     Arguments
@@ -188,7 +188,9 @@ def _get_MM_elec_potential(traj, mask, cutoff, frames, turnoff_mask, charges_db,
     )
 
 
-def get_MM_elec_potential(traj, masks, cutoff, frames, turnoff_mask, charges_db, remove_mean):
+def get_MM_elec_potential(
+    traj, masks, cutoff, frames, turnoff_mask, charges_db, remove_mean
+):
     """
     Get the MM electrostatic potential acting on one or more molecules.
     Arguments
@@ -210,7 +212,13 @@ def get_MM_elec_potential(traj, masks, cutoff, frames, turnoff_mask, charges_db,
     """
     return [
         _get_MM_elec_potential(
-            traj=traj, mask=m, cutoff=cutoff, frames=frames, turnoff_mask=turnoff_mask, charges_db=charges_db, remove_mean=remove_mean,
+            traj=traj,
+            mask=m,
+            cutoff=cutoff,
+            frames=frames,
+            turnoff_mask=turnoff_mask,
+            charges_db=charges_db,
+            remove_mean=remove_mean,
         )
         for m in masks
     ]
@@ -599,7 +607,14 @@ class MMElectrostaticPotential(object):
     """Electrostatic potential of a MM trajectory"""
 
     def __init__(
-        self, traj, mask, cutoff, frames=None, turnoff_mask=None, charges_db=None, remove_mean=False,
+        self,
+        traj,
+        mask,
+        cutoff,
+        frames=None,
+        turnoff_mask=None,
+        charges_db=None,
+        remove_mean=False,
     ):
         """
         Arguments
@@ -718,7 +733,7 @@ class MMElectrostaticPotential(object):
         # First selection: cut a box with box length 2 * self.cutoff
         idx0 = self.cut_box(coords1, coords2, residues_array)
         # mask storing which residues are within the box
-        mask = idx0 == True
+        mask = idx0 == True  # noqa: E712
         # Compute distances in the small box
         dd = np.sum((coords1[:, None, :] - coords2[idx0, :]) ** 2, axis=2) ** 0.5
         # Indices of atoms within cutoff
@@ -777,7 +792,7 @@ class MMElectrostaticPotential(object):
             return charges[indices]
         else:
             # MM charges taken from charge database
-            assert hasattr(self, "db") == True
+            assert hasattr(self, "db")
             charges = []
             for atom in self.top.atoms:
                 try:
@@ -786,7 +801,7 @@ class MMElectrostaticPotential(object):
                     pattern = res.strip() + " " + name.strip()
                     idx = np.where(self.db[:, 0] == pattern)[0][0]
                     charge = float(self.db[idx][1])
-                except IndexError as e:
+                except IndexError:
                     charge = atom.charge
                     msg = f"{self.__class__} charge for {res} {name} not found."
                     msg += f" Taking from topology (q={charge:.6f})"

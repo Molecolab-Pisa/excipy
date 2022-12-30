@@ -3,7 +3,6 @@ import numpy as np
 import scipy.linalg as scipy_la
 from .database import type_in_database, get_params, get_site_model, DatabaseError
 from .util import pbar
-from tqdm import tqdm
 
 
 def predict_site_energies(encodings, types, residue_ids, kind):

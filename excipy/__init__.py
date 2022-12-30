@@ -27,7 +27,7 @@ try:
     from . import tmu
 
     available_polarizable_module = True
-except:
+except ImportError:
     logging.warning(
         "Fortran code tmu.f90 not compiled. This means"
         " you cannot compute the environment polarization"

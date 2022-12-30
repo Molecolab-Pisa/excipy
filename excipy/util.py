@@ -154,7 +154,7 @@ def apply_distance_cutoff(coords, residue_ids, pairs, cutoff):
                 e.g., [[0, 1]] if only residues 0-1 are within the cutoff.
     """
     retain_list = _compute_retain_list(coords, residue_ids, pairs, cutoff)
-    pairs = [p for p, retain in zip(pairs, retain_list) if retain == True]
+    pairs = [p for p, retain in zip(pairs, retain_list) if retain == True]  # noqa: E712
     return pairs
 
 
@@ -175,7 +175,6 @@ def build_connectivity_matrix(topology, count_as="python"):
                  of the atoms connected to each other by a bond
     """
     c = _count_as(count_as)
-    num_atoms = topology.n_atoms
     connectivity = []
     for atom in topology.atoms:
         connectivity.append(atom.bonded_indices() + c)
@@ -335,7 +334,7 @@ def create_hdf5_outfile(outfile):
     # If the file is already there, create a backup copy
     if os.path.isfile(outfile):
         backup_file(outfile, 0)
-    with h5py.File(outfile, "w") as hf:
+    with h5py.File(outfile, "w"):
         pass
 
 
@@ -498,7 +497,7 @@ def save_site_energies(mean_energies, var_energies, residue_ids, kind, outfile):
             try:
                 me = me.numpy()
                 ve = ve.numpy()
-            except AttributeError as e:
+            except AttributeError:
                 pass
             hf[group].create_dataset("mean", data=me)
             hf[group].create_dataset("var", data=ve)
@@ -970,7 +969,7 @@ def load_as_exat(
         for j in range(i + 1, len(residue_ids)):
             pairs.append(residue_ids[i] + "_" + residue_ids[j])
     for pair in pairs:
-        if not pair in eq["coup"].keys():
+        if pair not in eq["coup"].keys():
             eq["coup"][pair] = np.zeros(n_frames)
         else:
             pass

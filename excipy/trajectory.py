@@ -1,7 +1,5 @@
-import os
 import numpy as np
 import pytraj as pt
-from tqdm import tqdm
 from .util import pbar
 
 

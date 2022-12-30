@@ -2,7 +2,6 @@ import numpy as np
 from scipy.sparse.linalg import LinearOperator, cg
 from scipy.spatial.distance import cdist
 import pytraj as pt
-from tqdm import tqdm
 from .tmu import tmu as tmu_fortran
 from .util import ANG2BOHR, HARTREE2CM_1
 from .util import (
@@ -129,11 +128,11 @@ def _compute_polarizabilities(topology, poldict=WANGAL):
     polarizabilities = []
     for atom in atoms:
         atnum = atom.atomic_number
-        resname = atom.resname
         # If uncommenting this if-else, the next "if"
+        # resname = atom.resname
         # should become an "elif"
         # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        ## Waters get their own parameters
+        ## Waters get their own parameters                  # noqa: E266
         # if resname in ['WAT', 'WCR']:
         #    pol = _water_polarizability(atnum)
         # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
