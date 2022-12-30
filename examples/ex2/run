@@ -1,0 +1,6 @@
+# (excipy environment should be active)
+
+#: ex2
+#: Compute the vacuum site energy of every chlorophyll
+
+excipy -c ../data/CP29.nc -p ../data/CP29.prmtop -r 234 235 236 237 238 239 240 241 242 243 244 245 246 --no_coup --no_site_env

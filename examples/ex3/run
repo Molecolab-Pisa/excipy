@@ -1,0 +1,6 @@
+# (excipy environment should be active)
+
+#: ex3
+#: Compute the vacuum and electrostatic embedding QM/MM (EE QM/MM) couplings, charges, transition dipoles, and energies
+
+excipy -c ../data/CP29.nc -p ../data/CP29.prmtop -r 234 235 236 237 238 239 240 241 242 243 244 245 246 --no_coup_pol --no_site_pol

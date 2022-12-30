@@ -1,0 +1,8 @@
+include MANIFEST.in
+include README.md
+include excipy/database/atom_names/*.json
+include excipy/database/parameters/*.json
+include excipy/database/rescalings/*.json
+recursive-include examples/*
+recursive-include excipy/cython *
+

@@ -1,0 +1,6 @@
+# (excipy environment should be active)
+
+#: ex5
+#: Compute the vacuum, electrostatic embedding QM/MM (EE QM/MM), and polarizable QM/MM (QM/MMPol) couplings, charges, transition dipoles, and energies. Apply a cutoff of 10 Angstrom to compute couplings. Do it only for frames from 1 to 10, with a stride of 2.
+
+excipy -c ../data/CP29.nc -p ../data/CP29.prmtop -r 234 235 236 237 238 239 240 241 242 243 244 245 246 --cutoff 10 --frames 1 10 2

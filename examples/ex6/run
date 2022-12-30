@@ -1,0 +1,7 @@
+# (excipy environment should be active)
+
+#: ex6
+#: Turn off the electrostatics of one protein residue
+
+# We turn off the whole residue 56 and compute the site energy of chlorophyll 236
+excipy -c ../data/CP29.nc -p ../data/CP29.prmtop -r 236 --no_site_pol -t :56

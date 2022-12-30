@@ -1,0 +1,9 @@
+# (excipy environment should be active)
+
+#: ex8
+#: Using excipy2exat to make exat output readable by Exat
+#: (https://molecolab.dcci.unipi.it/tools/tools-gaussian-users.html)
+#: (https://onlinelibrary.wiley.com/doi/full/10.1002/jcc.25118)
+
+# Block-averaging predictions over a window of 2 frames
+excipy2exat -i ../data/out.h5 -f 1 last 1 -w 2 --site_kind env_pol --coup_kind env_pol --dipo_kind env --ene_units cm_1

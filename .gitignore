@@ -1,0 +1,16 @@
+__pycache__/
+dev/
+train/
+docs/
+dist/
+excipy/*.so
+excipy/cython/*.c
+build/
+logo/
+tests/
+.ipynb_checkpoints/
+*.swp
+*.pyc
+*.egg-info
+*.so
+/*.sh

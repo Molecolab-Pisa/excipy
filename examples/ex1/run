@@ -1,0 +1,7 @@
+# (excipy environment should be active)
+
+#: ex1
+#: Compute the vacuum transition charges, transition dipoles, and coulomb couplings between all chlorophylls
+#: Note: EE QM/MM transition charges and couplings are always computed as they are obtained via a simple rescaling of vacuum charges
+
+excipy -c ../data/CP29.nc -p ../data/CP29.prmtop -r 234 235 236 237 238 239 240 241 242 243 244 245 246 --no_siten --no_coup_pol
