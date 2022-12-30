@@ -141,4 +141,5 @@ so if, e.g., your methyl hydrogens "1HMA", "2HMA", and "3HMA" are instead named 
 ## References
 
 [1]: Cignoni, Edoardo, Lorenzo Cupellini, and Benedetta Mennucci. “A Fast Method for Electronic Couplings in Embedded Multichromophoric Systems.” Journal of Physics: Condensed Matter (May 2022).
+
 [2]: __FILLME__
