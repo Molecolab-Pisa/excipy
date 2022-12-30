@@ -15,6 +15,29 @@ def get_ala3_traj():
     return traj, top
 
 
+def ref_coulomb_matrix():
+    """
+    Simple reference Coulomb Matrix
+    """
+    coords = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+    atnums = np.array([1.0, 1.0])
+    encoding = np.zeros((2, 2))
+    n_atoms = coords.shape[0]
+    for i in range(n_atoms):
+        for j in range(n_atoms):
+            if i == j:
+                encoding[i, i] = 0.5 * atnums[i] ** 2.4
+            else:
+                r_ij = np.sum((coords[i] - coords[j]) ** 2) ** 0.5
+                encoding[i, j] = (atnums[i] * atnums[j]) / r_ij
+    return coords, atnums, encoding
+
+
 # ============================================================================
 # Tests
 # ============================================================================
@@ -24,7 +47,7 @@ def get_ala3_traj():
 @pytest.mark.parametrize("triu", [True, False])
 def test_coulmat_shape(triu, mask):
     """
-    Test that encoding a Coulomb Matrix with `triu=True` gives an encoding with
+    Test that encoding a CoulombMatrix with `triu=True` gives an encoding with
     the correct dimensionality.
     """
     traj, top = get_ala3_traj()
@@ -44,3 +67,18 @@ def test_coulmat_shape(triu, mask):
     else:
         shape = (traj.n_frames, int(n_atoms * (n_atoms - 1) / 2.0))
     assert encoding.shape == shape
+
+
+def test_coulmat_output():
+    """
+    Test for the correct output of the CoulombMatrix encoding.
+    """
+    coords, atnums, ref_encoding = ref_coulomb_matrix()
+    encoding = CoulombMatrix(
+        coords=coords[None, :, :],
+        atnums=atnums,
+        residue_id="1",
+        triu=False,
+        permute_groups=None,
+    ).encode()
+    np.testing.assert_allclose(encoding[0], ref_encoding)
