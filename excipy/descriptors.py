@@ -231,7 +231,7 @@ def get_MM_elec_potential(
 
 class CoulombMatrix(object):
     """
-    Class representing a Coulomb Matrix encoder.
+    Coulomb Matrix encoder.
     """
 
     def __init__(self, coords, atnums, residue_id="", triu=True, permute_groups=None):

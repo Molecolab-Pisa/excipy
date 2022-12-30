@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 import pytraj as pt
-from excipy.descriptors import CoulombMatrix
+from excipy.descriptors import CoulombMatrix, MatrixPermutator
 
 # ============================================================================
 # Helpers
@@ -106,4 +106,39 @@ def test_coulmat_permutation():
         encoding = encoding[:, :, ::-1]
     else:
         assert False
-    np.testing.assert_allclose(encoding, ref_encoding)
+    np.testing.assert_allclose(encoding[0], ref_encoding)
+
+
+def test_permutator():
+    """
+    Test that a MatrixPermutator yields the correct output.
+    """
+    A = np.array(
+        [
+            [1.0, 1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    B = np.array(
+        [
+            [1.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    C = np.array(
+        [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    permuted = MatrixPermutator(permute_groups=np.array([[1, 2, 3]])).fit_transform(
+        [A, B]
+    )
+    for matrix in permuted:
+        np.testing.assert_equal(matrix, C)
