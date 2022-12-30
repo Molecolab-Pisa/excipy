@@ -1,4 +1,5 @@
-from collections import Iterable, defaultdict
+from collections import defaultdict
+from collections.abc import Iterable
 import numpy as np
 import scipy.linalg as scipy_la
 from .database import type_in_database, get_params, get_site_model, DatabaseError
