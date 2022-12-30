@@ -88,6 +88,21 @@ def _validate_iterable_of_strings(arg, argname):
                 )
 
 
+def _validate_masks(arg):
+    return _validate_iterable_of_strings(arg, argname="masks")
+
+
+def _validate_atom_names(arg):
+    if isinstance(arg, Iterable) and not isinstance(arg, str):
+        for elem in arg:
+            _validate_iterable_of_strings(elem, argname="Elements of `atom_names`")
+    else:
+        raise ValueError(
+            "atom_names should be given as a list of lists of str"
+            + ", e.g., for a single residue, [['H1', 'H2']]"
+        )
+
+
 def parse_masks(traj, masks, atom_names):
     """
     Parse the AMBER masks, collecting coordinates and atomic numbers
@@ -107,8 +122,14 @@ def parse_masks(traj, masks, atom_names):
     atnums     : list of ndarray, (num_atoms,)
                List of atomic numbers
     """
-    _validate_iterable_of_strings(masks, argname="masks")
-    _validate_iterable_of_strings(atom_names, argname="atom_names")
+    _validate_masks(masks)
+    _validate_atom_names(atom_names)
+    if len(masks) != len(atom_names):
+        raise ValueError(
+            "masks and atom_names should have the same length, but"
+            + f" len(masks)={len(masks)} and len(atom_names)={len(atom_names)}"
+        )
+
     coords = []
     atnums = []
     iterator = zip(masks, atom_names)

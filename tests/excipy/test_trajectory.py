@@ -85,7 +85,19 @@ def test_masks_not_list():
     """
     traj, top = get_ala3_traj()
     masks = ":1@H3,H2"
-    atom_names = ["H3", "H2"]
+    atom_names = [["H3", "H2"]]
+    with pytest.raises(ValueError):
+        parse_masks(traj, masks=masks, atom_names=atom_names)
+
+
+def test_masks_not_list_of_str():
+    """
+    Test that `parse_masks` fails when `masks` is not given as a list
+    of str.
+    """
+    traj, top = get_ala3_traj()
+    masks = [1]
+    atom_names = [["H3", "H2"]]
     with pytest.raises(ValueError):
         parse_masks(traj, masks=masks, atom_names=atom_names)
 
@@ -101,4 +113,25 @@ def test_atom_names_not_list():
         parse_masks(traj, masks=masks, atom_names=atom_names)
 
 
-test_atom_names_not_list()
+def test_atom_names_list_of_str():
+    """
+    Test that `parse_masks` fails when `atom_names` is not given as a list
+    of lists of strings.
+    """
+    traj, top = get_ala3_traj()
+    masks = [":1@H3,H2"]
+    atom_names = ["H3", "H2"]
+    with pytest.raises(ValueError):
+        parse_masks(traj, masks=masks, atom_names=atom_names)
+
+
+def test_masks_atom_names_different_length():
+    """
+    Test that `parse_masks` fails when `masks` and `atom_names` have
+    different length.
+    """
+    traj, top = get_ala3_traj()
+    masks = [":1@H3,H2", ":1@N"]
+    atom_names = [["H3", "H2"]]
+    with pytest.raises(ValueError):
+        parse_masks(traj, masks=masks, atom_names=atom_names)
