@@ -6,6 +6,7 @@
 **Authors**: Edoardo Cignoni, Lorenzo Cupellini, Benedetta Mennucci
 
 Machine-learning models for a fast estimation of excitonic Hamiltonians [1].
+Excipy provides estimates of site energies and excitonic couplings for chlorophylls *a* and *b* in vacuum, in electrostatic embedding QM/MM (EE QM/MM), and in polarizable embedding QM/MM (QM/MMPol).
 
 ## Install
 
@@ -45,7 +46,7 @@ The executable computes:
 * Vacuum, EE QM/MM, and QM/MMPol excitation energies;
 
 Currently, `excipy` models are trained on chlorophylls *a* and *b*.
-For a description of the ML models implemented in `excipy`, we refer to Refs. [1] and __XXX__.
+For a description of the ML models implemented in `excipy`, we refer to Refs. [1] and __FILLME__.
 These quantities can be computed along all-atom Molecular Dynamics trajectories.
 
 #### CLI: usage
@@ -121,7 +122,8 @@ output files:
   --outfile OUTFILE     Output file (HDF5).
 ```
 
-The output file of `excipy` can be read with excipy utilities.
+The `examples` folder contains several examples on how to use `excipy` to post-process a molecular dynamics simulation.
+The output file of `excipy` can be read with excipy utilities (see `examples/ex7`and `examples/ex8`).
 
 
 #### NOTE: Atom names
@@ -139,3 +141,4 @@ so if, e.g., your methyl hydrogens "1HMA", "2HMA", and "3HMA" are instead named 
 ## References
 
 [1]: Cignoni, Edoardo, Lorenzo Cupellini, and Benedetta Mennucci. “A Fast Method for Electronic Couplings in Embedded Multichromophoric Systems.” Journal of Physics: Condensed Matter (May 2022).
+[2]: __FILLME__
