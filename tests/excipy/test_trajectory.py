@@ -90,25 +90,25 @@ def test_masks_not_list():
         parse_masks(traj, masks=masks, atom_names=atom_names)
 
 
-def test_masks_not_list_of_str():
+@pytest.mark.parametrize("masks", [[1], [{"a": 1}], [["a"]]])
+def test_masks_not_list_of_str(masks):
     """
     Test that `parse_masks` fails when `masks` is not given as a list
     of str.
     """
     traj, top = get_ala3_traj()
-    masks = [1]
     atom_names = [["H3", "H2"]]
     with pytest.raises(ValueError):
         parse_masks(traj, masks=masks, atom_names=atom_names)
 
 
-def test_atom_names_not_list():
+@pytest.mark.parametrize("atom_names", ["H3", {"a": 1}, 2])
+def test_atom_names_not_list(atom_names):
     """
     Test that `parse_masks` fails when `atom_names` is not given as a list.
     """
     traj, top = get_ala3_traj()
     masks = [":1@H3,H2"]
-    atom_names = "H3"
     with pytest.raises(ValueError):
         parse_masks(traj, masks=masks, atom_names=atom_names)
 
