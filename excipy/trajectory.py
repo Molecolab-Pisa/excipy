@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 import numpy as np
 import pytraj as pt
 from .util import pbar
@@ -73,6 +74,14 @@ def parse_ensure_order(traj, mask, top, names):
     return xyz, z
 
 
+def _validate_masks(masks):
+    basemsg = "masks should be given as an iterable of strings."
+    if isinstance(masks, str):
+        raise ValueError(basemsg + f" Maybe you meant [{repr(masks)}]")
+    elif not isinstance(masks, Iterable):
+        raise ValueError(basemsg + f" You provided {type(masks)}")
+
+
 def parse_masks(traj, masks, atom_names):
     """
     Parse the AMBER masks, collecting coordinates and atomic numbers
@@ -92,6 +101,7 @@ def parse_masks(traj, masks, atom_names):
     atnums     : list of ndarray, (num_atoms,)
                List of atomic numbers
     """
+    _validate_masks(masks)
     coords = []
     atnums = []
     iterator = zip(masks, atom_names)

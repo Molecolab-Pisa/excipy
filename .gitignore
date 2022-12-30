@@ -7,7 +7,6 @@ excipy/*.so
 excipy/cython/*.c
 build/
 logo/
-tests/
 .ipynb_checkpoints/
 *.swp
 *.pyc
