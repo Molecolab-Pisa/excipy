@@ -109,7 +109,7 @@ def test_coulmat_permutation():
     np.testing.assert_allclose(encoding[0], ref_encoding)
 
 
-def test_permutator():
+def test_permutator_forward():
     """
     Test that a MatrixPermutator yields the correct output.
     """
@@ -137,8 +137,49 @@ def test_permutator():
             [1.0, 0.0, 0.0, 1.0],
         ]
     )
-    permuted = MatrixPermutator(permute_groups=np.array([[1, 2, 3]])).fit_transform(
-        [A, B]
-    )
+    mp = MatrixPermutator(permute_groups=np.array([[1, 2, 3]])).fit([A, B])
+    permuted = mp.transform([A, B])
     for matrix in permuted:
         np.testing.assert_equal(matrix, C)
+
+    vA = np.array([1.0, 1.0, 0.0, 0.0])
+    vB = np.array([1.0, 0.0, 1.0, 0.0])
+    vC = np.array([1.0, 0.0, 0.0, 1.0])
+    v_permuted = mp.transform([vA, vB])
+    for vector in v_permuted:
+        np.testing.assert_equal(vector, vC)
+
+
+def test_permutator_backward():
+    """
+    Test that a MatrixPermutator can recover the original matrices
+    from the permuted ones.
+    """
+    A = np.array(
+        [
+            [1.0, 1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    B = np.array(
+        [
+            [1.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    mp = MatrixPermutator(permute_groups=np.array([[1, 2, 3]])).fit([A, B])
+    permuted = mp.transform([A, B])
+    A_recovered, B_recovered = mp.inverse_transform(permuted)
+    np.testing.assert_equal(A_recovered, A)
+    np.testing.assert_equal(B_recovered, B)
+
+    vA = np.array([1.0, 1.0, 0.0, 0.0])
+    vB = np.array([1.0, 0.0, 1.0, 0.0])
+    v_permuted = mp.transform([vA, vB])
+    vA_recovered, vB_recovered = mp.inverse_transform(v_permuted)
+    np.testing.assert_equal(vA_recovered, vA)
+    np.testing.assert_equal(vB_recovered, vB)
