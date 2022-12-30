@@ -25,7 +25,9 @@ def ref_coulomb_matrix():
             [0.0, 1.0, 0.0],
         ]
     )
-    atnums = np.array([1.0, 1.0])
+    # do not put two equal numbers here or you may break
+    # some test that assume different numbers here
+    atnums = np.array([6.0, 1.0])
     encoding = np.zeros((2, 2))
     n_atoms = coords.shape[0]
     for i in range(n_atoms):
@@ -82,3 +84,26 @@ def test_coulmat_output():
         permute_groups=None,
     ).encode()
     np.testing.assert_allclose(encoding[0], ref_encoding)
+
+
+def test_coulmat_permutation():
+    """
+    Test that a CoulombMatrix with `permute_groups` different from
+    `None` gives the correct output.
+    """
+    coords, atnums, ref_encoding = ref_coulomb_matrix()
+    encoding = CoulombMatrix(
+        coords=coords[None, :, :],
+        atnums=atnums,
+        residue_id="1",
+        triu=False,
+        permute_groups=np.array([[0, 1]]),
+    ).encode()
+    if atnums[0] < atnums[1]:
+        pass
+    elif atnums[0] > atnums[1]:
+        encoding = encoding[:, ::-1]
+        encoding = encoding[:, :, ::-1]
+    else:
+        assert False
+    np.testing.assert_allclose(encoding, ref_encoding)
