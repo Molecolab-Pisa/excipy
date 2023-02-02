@@ -615,7 +615,8 @@ def load_tresp_charges(outfile, kind, frames=None):
 
 def load_dipoles(outfile, kind, frames=None):
     """
-    Load the dipoles from a HDF5 file.
+    Load the transition dipoles from a HDF5 file.
+    Transition dipoles are in AU.
     Arguments
     ---------
     outfile   : str
@@ -816,7 +817,8 @@ def rescale_tresp(charges, scalings):
 
 def get_dipoles(coords, charges):
     """
-    Compute the dipoles given the coordinates and the charges
+    Compute the transition dipoles given the coordinates and the charges
+    Transition dipoles are computed in AU.
     Arguments
     ---------
     coords    : list of ndarray, (num_samples, num_atoms, 3)
