@@ -142,4 +142,4 @@ so if, e.g., your methyl hydrogens "1HMA", "2HMA", and "3HMA" are instead named 
 
 [1]: Cignoni, Edoardo, Lorenzo Cupellini, and Benedetta Mennucci. “A Fast Method for Electronic Couplings in Embedded Multichromophoric Systems.” Journal of Physics: Condensed Matter (May 2022).
 
-[2]: __FILLME__
+[2]: Cignoni, Edoardo, Lorenzo Cupellini, and Benedetta Mennucci. "Machine Learning Exciton Hamiltonians in Light-Harvesting Complexes." Journal of Chemical Theory and Computation (January 2023).
