@@ -945,6 +945,7 @@ def load_as_exat(
         frames=frames,
         sites_kind=sites_kind,
         coups_kind=coups_kind,
+        dipoles_kind=dipoles_kind,
         ene_units=ene_units,
     )
     residue_ids = list(eq["ChromList"].keys())
