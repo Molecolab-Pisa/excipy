@@ -125,7 +125,16 @@ def cli_parse(argv):
         required=False,
         default=999.0,
         type=float,
-        help="Distance cutoff in Angstrom (no coupling for molecules farther than cutoff).",
+        help="Distance cutoff in Angstrom (no coupling for molecules farther than cutoff). NOTE: if a list of coupling is provided by the --coup_list option, the cutoff is ignored.",
+    )
+
+    opt(
+        "--coup_list",
+        required=False,
+        default=None,
+        # type=list,
+        nargs="+",
+        help="Residues pairs you want to compute the couplings on, e.g. 664_665, 664_666. Has the priority on --cutoff option.",
     )
 
     opt(
@@ -367,9 +376,11 @@ def compute_couplings(traj, args):
     else:
         print_action("Computing vacuum couplings")
         # Compute the couplings using the predicted TrEsp charges
+
         predicted_couplings, pairs_ids = compute_coulomb_couplings(
-            coords, vac_tresp, args.residue_ids, args.cutoff
+            coords, vac_tresp, args.residue_ids, args.cutoff, args.coup_list
         )
+
         print_predicted_couplings(predicted_couplings, pairs_ids, kind="V_vac")
         # No coupling to save if no molecule is within the cutoff distance
         if predicted_couplings is None:
