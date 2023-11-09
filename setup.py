@@ -11,13 +11,24 @@ ext_modules = [
         extra_link_args=["-lgomp"],
     ),
 ]
+
 ext_modules += cythonize(
     Extension(
-        "excipy.retain_full_residues",
+        "excipy.clib.retain_full_residues",
         ["excipy/cython/retain_full_residues.pyx"],
         include_dirs=[np.get_include()],
     )
 )
+
+# ext_modules += cythonize(
+#     Extension(
+#         "excipy.clib.kernels",
+#         ["excipy/cython/kernels.pyx"],
+#         include_dirs=[np.get_include()],
+#         extra_compile_args=["-fopenmp"],
+#         extra_link_args=["-fopenmp"],
+#     )
+# )
 
 
 package_data = {

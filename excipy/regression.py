@@ -1,12 +1,96 @@
+from functools import partial
 from collections import defaultdict
 from collections.abc import Iterable
 import numpy as np
 import scipy.linalg as scipy_la
-from .database import type_in_database, get_params, get_site_model, DatabaseError
-from .util import pbar
+from .database import type_in_database, get_params, DatabaseError
+from .util import pbar, squared_distances
+
+# ===================================================================
+# Some functions to compute kernels
+# just the ones we need, there is no general infrastructure here
+#
 
 
-def predict_site_energies(encodings, types, residue_ids, kind):
+def matern52_kernel(x1, x2, lengthscale, variance):
+    dist2 = 5.0 * squared_distances(x1=x1, x2=x2) / (lengthscale**2)
+    dist = np.sqrt(np.maximum(dist2, 1e-300))
+    return variance * (1.0 + dist + (1.0 / 3.0) * dist2) * np.exp(-dist)
+
+
+#
+# Site energy prediction in vacuum
+#
+
+# since computing k_mm is expensive and, once done, is ok for
+# all other frames of the same molecule type (e.g., CLA), we keep
+# a cache of its cholesky decomposition L, k_mm = L @ L.T, here
+_PREDICT_SITE_ENERGIES_VAC_CACHE = {}
+
+
+def predict_site_energies_chlorophyll_vac(encoding, model_params, residue_id, chl):
+    # compute matern kernel, m = n. train points, n = n. new points
+    k_nm = matern52_kernel(
+        x1=encoding,
+        x2=model_params["x_train"],
+        lengthscale=model_params["lengthscale"],
+        variance=model_params["variance"],
+    )
+    # predict the mean
+    mean = np.dot(k_nm, model_params["coefs"]) + model_params["mu"]
+
+    # predict the variance
+    cache_key = (chl, "L_m")
+    if cache_key in _PREDICT_SITE_ENERGIES_VAC_CACHE:
+        L_m = _PREDICT_SITE_ENERGIES_VAC_CACHE[cache_key]
+
+    else:
+        k_mm = matern52_kernel(
+            x1=model_params["x_train"],
+            x2=model_params["x_train"],
+            lengthscale=model_params["lengthscale"],
+            variance=model_params["variance"],
+        ) + (model_params["sigma"] ** 2 + 1e-8) * np.eye(
+            model_params["x_train"].shape[0]
+        )
+        L_m = scipy_la.cholesky(k_mm, lower=True)
+
+        # update cache
+        _PREDICT_SITE_ENERGIES_VAC_CACHE[cache_key] = L_m
+
+    G_mn = scipy_la.solve_triangular(L_m, k_nm.T, lower=True)
+
+    variance = matern52_kernel(
+        encoding,
+        encoding,
+        lengthscale=model_params["lengthscale"],
+        variance=model_params["variance"],
+    )
+
+    variance = variance - np.dot(G_mn.T, G_mn)
+
+    return mean, variance
+
+
+# this function is the same for chl b
+predict_site_energies_cla_vac = partial(
+    predict_site_energies_chlorophyll_vac, chl="CLA"
+)
+predict_site_energies_chl_vac = partial(
+    predict_site_energies_chlorophyll_vac, chl="CHL"
+)
+
+_PREDICT_SITE_ENERGIES_FUNCS = {
+    ("CLA", "VAC"): predict_site_energies_cla_vac,
+    ("CHL", "VAC"): predict_site_energies_chl_vac,
+}
+
+#
+# wrapper
+#
+
+
+def predict_site_energies(encoding, type, model_params, residue_id, kind):
     """
     Predict the site energy of each molecule with Gaussian Process Regression.
     Arguments
@@ -25,24 +109,31 @@ def predict_site_energies(encodings, types, residue_ids, kind):
                   Dictionary with mean and variance of each
                   prediction.
     """
-    # Load the models once in order to save time
-    models = {t: get_site_model(t, kind=kind) for t in types}
 
     iterator = pbar(
-        zip(encodings, types, residue_ids),
-        total=len(encodings),
+        encoding,
+        total=encoding.shape[0],
         desc=": Predicting siten",
         ncols=79,
     )
 
-    site_energies = defaultdict(list)
-    for encoding, type, residue_id in iterator:
-        iterator.set_postfix(residue_id=f"{residue_id}")
-        model = models[type]
-        y, y_var = model.predict_f_compiled(encoding)
-        site_energies["y_mean"].append(y)
-        site_energies["y_var"].append(y_var)
-    return site_energies
+    siten = defaultdict(list)
+
+    func = _PREDICT_SITE_ENERGIES_FUNCS[(type.upper(), kind.upper())]
+
+    for x in iterator:
+        # shape (1, n_features)
+        x = np.atleast_2d(x)
+
+        mean, variance = func(x, model_params, residue_id)
+
+        siten["y_mean"].append(mean)
+        siten["y_var"].append(variance)
+
+    for key in siten.keys():
+        siten[key] = np.concatenate(siten[key], axis=0)
+
+    return siten
 
 
 def predict_tresp_charges(encodings, descriptors, types, residue_ids):

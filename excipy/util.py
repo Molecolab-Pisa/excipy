@@ -69,6 +69,35 @@ atomnum2atomsym = {value: key for key, value in atomsym2atomnum.items()}
 # =============================================================================
 
 
+def squared_distances(x1, x2):
+    """squared euclidean distances
+
+    This is a memory-efficient (and fast) implementation of the
+    calculation of squared euclidean distances. Euclidean distances
+    between `x1` of shape (n_samples1, n_feats) and `x2` of shape
+    (n_samples2, n_feats) is evaluated by using the "euclidean distances
+    trick":
+
+        dist = X1 @ X1.T - 2 X1 @ X2.T + X2 @ X2.T
+
+    Note: this function evaluates distances between batches of points
+    """
+    jitter = 1e-12
+    x1s = np.sum(np.square(x1), axis=-1)
+    x2s = np.sum(np.square(x2), axis=-1)
+    dist = x1s[:, np.newaxis] - 2 * np.dot(x1, x2.T) + x2s + jitter
+    return dist
+
+
+def euclidean_distances(x1, x2):
+    """euclidean distances
+
+    Memory efficient and fast implementation of the calculation
+    of squared euclidean distances.
+    """
+    return np.maximum(squared_distances(x1=x1, x2=x2), 1e-300) ** 0.5
+
+
 def _distance_geometric_center(coords1, coords2):
     """
     Compute the distance between the geometric centers
@@ -497,7 +526,7 @@ def save_coulomb_couplings(couplings, pairs_ids, kind, outfile):
             hf[group].create_dataset(p, data=c)
 
 
-def save_site_energies(mean_energies, var_energies, residue_ids, kind, outfile):
+def save_site_energies(mean_energies, var_energies, residue_id, kind, outfile):
     """
     Save the site energies to an existing HDF5 file.
     Arguments
@@ -506,25 +535,19 @@ def save_site_energies(mean_energies, var_energies, residue_ids, kind, outfile):
                   Site energies (mean value)
     var_energies  : list of ndarray, (num_samples,)
                   Site energies (variance)
-    residue_ids   : list of str
-                  Residue IDs
+    residue_id    : str
+                  Residue ID
     kind          : str
                   Kind of site energy (e.g., vac, env, env_pol)
     outfile       : str
                   Filename
     """
     with h5py.File(outfile, "a") as hf:
-        for r, me, ve in zip(residue_ids, mean_energies, var_energies):
-            group = f"siten/{kind}/{r}"
-            if group not in hf:
-                hf.create_group(group)
-            try:
-                me = me.numpy()
-                ve = ve.numpy()
-            except AttributeError:
-                pass
-            hf[group].create_dataset("mean", data=me)
-            hf[group].create_dataset("var", data=ve)
+        group = f"siten/{kind}/{residue_id}"
+        if group not in hf:
+            hf.create_group(group)
+        hf[group].create_dataset("mean", data=mean_energies)
+        hf[group].create_dataset("var", data=var_energies)
 
 
 # =============================================================================

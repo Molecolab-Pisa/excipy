@@ -21,6 +21,7 @@ from excipy.database import (
     get_rescalings,
     select_masks,
     set_database_folder,
+    get_site_model_params,
 )
 from excipy.util import (
     EV2CM,
@@ -484,6 +485,10 @@ def _compute_vac_site_energies(coords, atnums, types, args):
     """
     encodings = []
     sites_vac = defaultdict(list)
+
+    # load the model parameters here to save time
+    model_params = {t: get_site_model_params(t, kind="vac") for t in set(types)}
+
     for coord, atnum, residue_id, type in zip(coords, atnums, args.residue_ids, types):
         # Encode geometry returns a list: get the first (and only) element.
         # Same for `get_coulomb_matrix`.
@@ -496,14 +501,17 @@ def _compute_vac_site_energies(coords, atnums, types, args):
         encoding = encode_geometry(coul_mat)
         encodings.append(encoding[0])
         # Predict the site energy
-        site_vac = predict_site_energies(encoding, (type,), (residue_id,), kind="vac")
-        sites_vac["y_mean"].append(site_vac["y_mean"][0])
-        sites_vac["y_var"].append(site_vac["y_var"][0])
+        site_vac = predict_site_energies(
+            encoding[0], type, model_params[type], residue_id, kind="vac"
+        )
+        # site_vac = predict_site_energies_old(encoding, (type,), (residue_id,), kind='vac')
+        sites_vac["y_mean"].append(site_vac["y_mean"])
+        sites_vac["y_var"].append(site_vac["y_var"])
         # Save the site energy
         save_site_energies(
             site_vac["y_mean"],
             site_vac["y_var"],
-            (residue_id,),
+            residue_id,
             kind="vac",
             outfile=args.outfile,
         )

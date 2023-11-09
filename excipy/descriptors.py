@@ -3,7 +3,7 @@ import numpy as np
 import pytraj as pt
 from collections.abc import Iterable
 from .util import ANG2BOHR, pbar
-from .retain_full_residues import retain_full_residues_cy
+from .clib.retain_full_residues import retain_full_residues_cy
 
 
 # =============================================================================

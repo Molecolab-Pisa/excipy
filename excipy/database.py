@@ -253,6 +253,18 @@ def get_rescalings(type):
         return _get_rescalings(type)
 
 
+def get_site_model_params(type, kind):
+    """
+    Get the site energy model parameters from the database.
+    """
+    if (kind == "vac") or (kind == "env"):
+        path = os.path.join(database_paths.models, f"GPR_{kind}_{type}/model.npz")
+        try:
+            return np.load(path)
+        except FileNotFoundError:
+            return DatabaseError(f"Model GPR_{kind}_{type} not found in database.")
+
+
 def get_site_model(type, kind):
     """
     Get the site energy model from the database.
