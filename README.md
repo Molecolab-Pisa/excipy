@@ -101,7 +101,13 @@ optional:
                         of the MM region (e.g., ':1' to turn off
                         electrostatics of resid 1)
   --cutoff CUTOFF       Distance cutoff in Angstrom (no coupling for molecules
-                        farther than cutoff).
+                        farther than cutoff). NOTE: if a list of coupling is
+                        provided by the --coup_list option, the cutoff is
+                        ignored.
+  --coup_list COUP_LIST [COUP_LIST ...]
+                        Residues pairs you want to compute the couplings on,
+                        e.g. 664_665, 664_666. Has the priority on --cutoff
+                        option.
   --no_coup             Whether to skip computing Coulomb couplings between
                         chlorophylls.
   --no_siten            Whether to skip computing site energies between

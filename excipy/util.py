@@ -216,32 +216,34 @@ def _coulomb_coupling(coord_pairs, charge_pairs):
     return V
 
 
-def coulomb_coupling(coords, charges, residue_ids, pairs, cutoff):
+def coulomb_coupling(coords, charges, residue_ids, molecule_pairs):
     """
     Compute the Coulomb coupling between molecule pairs for a density
     projected onto point charges.
     Arguments
     ---------
-    coords      : list of ndarray, (num_samples, num_atoms, 3)
-                Atomic coordinates.
-    charges     : list of ndarray, (num_samples, num_atoms,)
-                Point charges.
-    residue_ids : list of str
-                Indices/names of the molecules.
-    pairs       : list of lists
-                Each sublist contains the indeces of the residues forming the pair
-                e.g., [[0, 1], [2, 3]] for pairs 0-1 and 2-3.
-    cutoff      : float
-                Cutoff value. The coupling is computed for pairs within the cutoff.
+    coords         : list of ndarray, (num_samples, num_atoms, 3)
+                   Atomic coordinates.
+    charges        : list of ndarray, (num_samples, num_atoms,)
+                   Point charges.
+    residue_ids    : list of str
+                   Indices/names of the molecules.
+
+    molecule_pairs : list of of lists
+                   Each sublist contains the indeces of the residues forming the pair.
+                   e.g., [[0, 1], [2, 3]] for pairs 0-1 and 2-3.
+                   The list only contains the pairs on which the couplings are effectively
+                   computed (either the list of pairs provided by the user or the one
+                   obtained after applying the cutoff).
+
     Returns
     -------
-    couplings   : list of ndarray, (num_samples,)
-                Coulomb couplings.
-    residue_ids : list of lists
-                Each sublist contains the residue_ids for which the coupling has been computed.
+    couplings      : list of ndarray, (num_samples,)
+                   Coulomb couplings.
+    residue_ids    : list of lists
+                   Each sublist contains the residue_ids for which the coupling has been computed.
     """
-    # Apply a distance cutoff on the list of molecules
-    molecule_pairs = apply_distance_cutoff(coords, residue_ids, pairs, cutoff)
+
     if len(molecule_pairs) < 1:
         # No coupling to be computed
         return (None, None)
@@ -269,20 +271,22 @@ def coulomb_coupling(coords, charges, residue_ids, pairs, cutoff):
     return couplings, residue_ids
 
 
-def compute_coulomb_couplings(coords, charges, residue_ids, cutoff):
+def compute_coulomb_couplings(coords, charges, residue_ids, cutoff, coupling_list):
     """
     Compute the Coulomb interaction between all
     unique pairs of molecules.
     Arguments
     ---------
-    coords      : list of ndarray, (num_samples, num_atoms, 3)
-                Atomic coordinates.
-    charges     : list of ndarray, (num_samples, num_atoms,)
-                Point charges.
-    residue_ids : list of str
-                Indices/names of the molecules.
-    cutoff      : float
-                Cutoff value. The coupling is computed for pairs within the cutoff.
+    coords        : list of ndarray, (num_samples, num_atoms, 3)
+                  Atomic coordinates.
+    charges       : list of ndarray, (num_samples, num_atoms,)
+                  Point charges.
+    residue_ids   : list of str
+                  Indices/names of the molecules.
+    cutoff        : float
+                  Cutoff value. The coupling is computed for pairs within the cutoff.
+    coupling_list : list of str
+                  list of pairs of residues ids, e.g. ["664_665", "667_670", ...]
     Return
     ------
     couplings      : list of ndarray, (num_frames,)
@@ -291,11 +295,31 @@ def compute_coulomb_couplings(coords, charges, residue_ids, cutoff):
                    list of tuples, each storing the residue IDs of the
                    two molecule for which the coupling is computed.
     """
-    num_molecules = len(coords)
-    pairs = [
-        (i, j) for i in range(num_molecules - 1) for j in range(i + 1, num_molecules)
-    ]
-    return coulomb_coupling(coords, charges, residue_ids, pairs, cutoff)
+
+    if coupling_list is None:
+
+        num_molecules = len(coords)
+        pairs = [
+            (i, j)
+            for i in range(num_molecules - 1)
+            for j in range(i + 1, num_molecules)
+        ]
+
+        molecule_pairs = apply_distance_cutoff(coords, residue_ids, pairs, cutoff)
+
+    else:
+
+        pairs = []
+
+        for c in coupling_list:
+            res1, res2 = c.split("_")
+            pair_idx = (residue_ids.index(res1), residue_ids.index(res2))
+            pairs.append(pair_idx)
+
+        # Do not use cutoff if list is provided
+        molecule_pairs = pairs.copy()
+
+    return coulomb_coupling(coords, charges, residue_ids, molecule_pairs)
 
 
 # =============================================================================
