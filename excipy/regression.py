@@ -13,18 +13,74 @@ from .util import pbar, squared_distances
 
 
 def matern52_kernel(x1, x2, lengthscale, variance):
+    """matern kernel (ν=2.5)
+
+    Computes the Matern kernel with ν=2.5:
+
+        k(x, x') = σ² (1 + √5 z + (5/3)z²) exp(-√5 z)
+
+    where z = (d / λ), λ is the lengthscale, σ² is the variance,
+    and d is the Euclidean distance ∥ x - x'∥.
+
+    Args:
+        x1: input array, shape (n_samples_1, n_features)
+        x2: input array, shape (n_samples_2, n_features)
+        lengthscale: float
+        variance: float
+    Returns:
+        kernel: matern kernel (ν=2.5), shape (n_samples_1, n_samples_2)
+    """
     dist2 = 5.0 * squared_distances(x1=x1, x2=x2) / (lengthscale**2)
     dist = np.sqrt(np.maximum(dist2, 1e-300))
     return variance * (1.0 + dist + (1.0 / 3.0) * dist2) * np.exp(-dist)
 
 
 def linear_kernel(x1, x2, variance):
+    """linear kernel
+
+    Computes the linear kernel:
+
+        k(x, x') = σ² x∙x'
+
+    where σ² is the variance.
+
+    Args:
+        x1: input array, shape (n_samples_1, n_features)
+        x2: input array, shape (n_samples_2, n_features)
+        variance: float
+    Returns:
+        kernel: linear kernel, shape (n_samples_1, n_samples_2)
+    """
     return variance * np.dot(x1, x2.T)
 
 
 def m52cm_linpot_kernel(
     x1, x2, variance_lin, variance_m52, lengthscale_m52, cm_dims, pot_dims
 ):
+    """elechtrochromic shift kernel
+
+    Computes the kernel developed in [1] to compute the electrochromic
+    shift:
+
+        k(x, x', y, y') = k_lin(x, x', σ²₁) (1. + k_m52(y, y', λ, σ²₂))
+
+    where x, x' are electrostatic potential descriptors, y, y' are
+    coulomb matrix descriptors, k_lin is a linear kernel, and k_m52
+    is the Matern kernel with ν=2.5.
+
+    Args:
+        x1: input array, shape (n_samples_1, n_features)
+        x2: input array, shape (n_samples_2, n_features)
+        variance_lin: σ²₁, float
+        variance_m52: σ²₂, float
+        lengthscale_m52: λ, float
+        cm_dims: dimensions of the coulomb matrix entries in both x1 and x2,
+                 shape (n_cm_dims,)
+        pot_dims: dimensions of the potential entries in both x1 and x2,
+                 shape (n_pot_dims,)
+    Returns:
+        kernel: shape (n_samples_1, n_samples_2)
+    """
     return linear_kernel(
         x1=x1[:, pot_dims], x2=x2[:, pot_dims], variance=variance_lin
     ) * (
@@ -48,6 +104,21 @@ _PREDICT_GP_CACHE = {}
 
 
 def predict_gp(x, x_train, kernel, mu, coefs, sigma, cache_key=None):
+    """predict with Gaussian Process regression
+
+    Args:
+        x: new point, shape (1, n_features)
+        x_train: training points, shape (n_train, n_features)
+        kernel: callable with signature k(x, x_train) that computes the
+                kernel
+        mu: target mean
+        coefs: linear coefficients
+        sigma: standard deviation of the noise
+        cache_key: tuple for caching the train kernel
+    Returns:
+        mean: the GP posterior mean
+        variance: the GP posterior variance
+    """
     k_nm = kernel(x, x_train)
     mean = np.dot(k_nm, coefs) + mu
 
