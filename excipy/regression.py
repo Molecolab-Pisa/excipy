@@ -18,71 +18,145 @@ def matern52_kernel(x1, x2, lengthscale, variance):
     return variance * (1.0 + dist + (1.0 / 3.0) * dist2) * np.exp(-dist)
 
 
-#
-# Site energy prediction in vacuum
-#
+def linear_kernel(x1, x2, variance):
+    return variance * np.dot(x1, x2.T)
 
+
+def m52cm_linpot_kernel(
+    x1, x2, variance_lin, variance_m52, lengthscale_m52, cm_dims, pot_dims
+):
+    return linear_kernel(
+        x1=x1[:, pot_dims], x2=x2[:, pot_dims], variance=variance_lin
+    ) * (
+        1.0
+        + matern52_kernel(  # noqa: W503
+            x1=x1[:, cm_dims],
+            x2=x2[:, cm_dims],
+            lengthscale=lengthscale_m52,
+            variance=variance_m52,
+        )
+    )
+
+
+# ===================================================================
+# Functions to predict with GP
+#
 # since computing k_mm is expensive and, once done, is ok for
 # all other frames of the same molecule type (e.g., CLA), we keep
 # a cache of its cholesky decomposition L, k_mm = L @ L.T, here
-_PREDICT_SITE_ENERGIES_VAC_CACHE = {}
+_PREDICT_GP_CACHE = {}
 
 
-def predict_site_energies_chlorophyll_vac(encoding, model_params, residue_id, chl):
-    # compute matern kernel, m = n. train points, n = n. new points
-    k_nm = matern52_kernel(
-        x1=encoding,
-        x2=model_params["x_train"],
-        lengthscale=model_params["lengthscale"],
-        variance=model_params["variance"],
-    )
-    # predict the mean
-    mean = np.dot(k_nm, model_params["coefs"]) + model_params["mu"]
+def predict_gp(x, x_train, kernel, mu, coefs, sigma, cache_key=None):
+    k_nm = kernel(x, x_train)
+    mean = np.dot(k_nm, coefs) + mu
 
-    # predict the variance
-    cache_key = (chl, "L_m")
-    if cache_key in _PREDICT_SITE_ENERGIES_VAC_CACHE:
-        L_m = _PREDICT_SITE_ENERGIES_VAC_CACHE[cache_key]
+    if cache_key is not None and cache_key in _PREDICT_GP_CACHE.keys():
+        # get the choleksy decomposition from the cache
+        L_m = _PREDICT_GP_CACHE[cache_key]
 
     else:
-        k_mm = matern52_kernel(
-            x1=model_params["x_train"],
-            x2=model_params["x_train"],
-            lengthscale=model_params["lengthscale"],
-            variance=model_params["variance"],
-        ) + (model_params["sigma"] ** 2 + 1e-8) * np.eye(
-            model_params["x_train"].shape[0]
-        )
+        # compute cholesky decomposition of train kernel
+        k_mm = kernel(x_train, x_train)
+        k_mm += (sigma**2 + 1e-8) * np.eye(k_mm.shape[0])
         L_m = scipy_la.cholesky(k_mm, lower=True)
 
-        # update cache
-        _PREDICT_SITE_ENERGIES_VAC_CACHE[cache_key] = L_m
+        if cache_key is not None:
+            # update cache
+            _PREDICT_GP_CACHE[cache_key] = L_m
 
+    # Compute the variance.
     G_mn = scipy_la.solve_triangular(L_m, k_nm.T, lower=True)
-
-    variance = matern52_kernel(
-        encoding,
-        encoding,
-        lengthscale=model_params["lengthscale"],
-        variance=model_params["variance"],
-    )
-
-    variance = variance - np.dot(G_mn.T, G_mn)
+    variance = kernel(x, x) - np.dot(G_mn.T, G_mn)
 
     return mean, variance
 
 
-# this function is the same for chl b
+#
+# Site energy prediction in vacuum and environment
+#
+
+
+def predict_site_energies_chlorophyll_vac(encoding, model_params, residue_id, chl):
+    # define a kernel functions that takes x and x_train only
+    kernel_func = partial(
+        matern52_kernel,
+        lengthscale=model_params["lengthscale"],
+        variance=model_params["variance"],
+    )
+
+    # define the key for caching the cholesky decomposition of k_train
+    cache_key = (chl.upper(), "VAC")
+
+    # mean and variance from gaussian process
+    mean, variance = predict_gp(
+        encoding,
+        x_train=model_params["x_train"],
+        kernel=kernel_func,
+        mu=model_params["mu"],
+        coefs=model_params["coefs"],
+        sigma=model_params["sigma"],
+        cache_key=cache_key,
+    )
+
+    return mean, variance
+
+
+def predict_site_energies_chlorophyll_env_shift(
+    encoding, model_params, residue_id, chl
+):
+    # define a kernel function that takes x and x_train only
+    kernel_func = partial(
+        m52cm_linpot_kernel,
+        variance_lin=model_params["variance_lin"],
+        variance_m52=model_params["variance_m52"],
+        lengthscale_m52=model_params["lengthscale_m52"],
+        cm_dims=model_params["cm_dims"],
+        pot_dims=model_params["pot_dims"],
+    )
+
+    # define the key for caching the cholesky decomposition of k_train
+    cache_key = (chl.upper(), "ENV")
+
+    # mean and variance from gaussian process
+    mean, variance = predict_gp(
+        encoding,
+        x_train=model_params["x_train"],
+        kernel=kernel_func,
+        mu=model_params["mu"],
+        coefs=model_params["coefs"],
+        sigma=model_params["sigma"],
+        cache_key=cache_key,
+    )
+
+    return mean, variance
+
+
+# specialize for chl a and b
+# vac
 predict_site_energies_cla_vac = partial(
-    predict_site_energies_chlorophyll_vac, chl="CLA"
+    predict_site_energies_chlorophyll_vac,
+    chl="CLA",
 )
 predict_site_energies_chl_vac = partial(
-    predict_site_energies_chlorophyll_vac, chl="CHL"
+    predict_site_energies_chlorophyll_vac,
+    chl="CHL",
+)
+# env shift
+predict_site_energies_cla_env_shift = partial(
+    predict_site_energies_chlorophyll_env_shift,
+    chl="CLA",
+)
+predict_site_energies_chl_env_shift = partial(
+    predict_site_energies_chlorophyll_env_shift,
+    chl="CHL",
 )
 
 _PREDICT_SITE_ENERGIES_FUNCS = {
     ("CLA", "VAC"): predict_site_energies_cla_vac,
     ("CHL", "VAC"): predict_site_energies_chl_vac,
+    ("CLA", "ENV"): predict_site_energies_cla_env_shift,
+    ("CHL", "ENV"): predict_site_energies_chl_env_shift,
 }
 
 #
