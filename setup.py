@@ -11,9 +11,10 @@ ext_modules = [
         extra_link_args=["-lgomp"],
     ),
 ]
+
 ext_modules += cythonize(
     Extension(
-        "excipy.retain_full_residues",
+        "excipy.clib.retain_full_residues",
         ["excipy/cython/retain_full_residues.pyx"],
         include_dirs=[np.get_include()],
     )
@@ -62,8 +63,6 @@ setup(
         "numpy",
         "scipy",
         "tqdm",
-        "tensorflow",
-        "gpflow",
         "cython",
     ],
 )

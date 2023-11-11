@@ -18,7 +18,7 @@ from . import trajectory
 from . import util
 
 # Cython functions
-from . import retain_full_residues
+from . import clib
 
 # We make this import conditional on whether
 # the user has compiled the Fortran code.

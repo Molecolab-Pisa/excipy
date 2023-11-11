@@ -1,12 +1,241 @@
+from functools import partial
 from collections import defaultdict
 from collections.abc import Iterable
 import numpy as np
 import scipy.linalg as scipy_la
-from .database import type_in_database, get_params, get_site_model, DatabaseError
-from .util import pbar
+from .database import type_in_database, get_params, DatabaseError
+from .util import pbar, squared_distances
+
+# ===================================================================
+# Some functions to compute kernels
+# just the ones we need, there is no general infrastructure here
+#
 
 
-def predict_site_energies(encodings, types, residue_ids, kind):
+def matern52_kernel(x1, x2, lengthscale, variance):
+    """matern kernel (ν=2.5)
+
+    Computes the Matern kernel with ν=2.5:
+
+        k(x, x') = σ² (1 + √5 z + (5/3)z²) exp(-√5 z)
+
+    where z = (d / λ), λ is the lengthscale, σ² is the variance,
+    and d is the Euclidean distance ∥ x - x'∥.
+
+    Args:
+        x1: input array, shape (n_samples_1, n_features)
+        x2: input array, shape (n_samples_2, n_features)
+        lengthscale: float
+        variance: float
+    Returns:
+        kernel: matern kernel (ν=2.5), shape (n_samples_1, n_samples_2)
+    """
+    dist2 = 5.0 * squared_distances(x1=x1, x2=x2) / (lengthscale**2)
+    dist = np.sqrt(np.maximum(dist2, 1e-300))
+    return variance * (1.0 + dist + (1.0 / 3.0) * dist2) * np.exp(-dist)
+
+
+def linear_kernel(x1, x2, variance):
+    """linear kernel
+
+    Computes the linear kernel:
+
+        k(x, x') = σ² x∙x'
+
+    where σ² is the variance.
+
+    Args:
+        x1: input array, shape (n_samples_1, n_features)
+        x2: input array, shape (n_samples_2, n_features)
+        variance: float
+    Returns:
+        kernel: linear kernel, shape (n_samples_1, n_samples_2)
+    """
+    return variance * np.dot(x1, x2.T)
+
+
+def m52cm_linpot_kernel(
+    x1, x2, variance_lin, variance_m52, lengthscale_m52, cm_dims, pot_dims
+):
+    """elechtrochromic shift kernel
+
+    Computes the kernel developed in [1] to compute the electrochromic
+    shift:
+
+        k(x, x', y, y') = k_lin(x, x', σ²₁) (1. + k_m52(y, y', λ, σ²₂))
+
+    where x, x' are electrostatic potential descriptors, y, y' are
+    coulomb matrix descriptors, k_lin is a linear kernel, and k_m52
+    is the Matern kernel with ν=2.5.
+
+    Args:
+        x1: input array, shape (n_samples_1, n_features)
+        x2: input array, shape (n_samples_2, n_features)
+        variance_lin: σ²₁, float
+        variance_m52: σ²₂, float
+        lengthscale_m52: λ, float
+        cm_dims: dimensions of the coulomb matrix entries in both x1 and x2,
+                 shape (n_cm_dims,)
+        pot_dims: dimensions of the potential entries in both x1 and x2,
+                 shape (n_pot_dims,)
+    Returns:
+        kernel: shape (n_samples_1, n_samples_2)
+    """
+    return linear_kernel(
+        x1=x1[:, pot_dims], x2=x2[:, pot_dims], variance=variance_lin
+    ) * (
+        1.0
+        + matern52_kernel(  # noqa: W503
+            x1=x1[:, cm_dims],
+            x2=x2[:, cm_dims],
+            lengthscale=lengthscale_m52,
+            variance=variance_m52,
+        )
+    )
+
+
+# ===================================================================
+# Functions to predict with GP
+#
+# since computing k_mm is expensive and, once done, is ok for
+# all other frames of the same molecule type (e.g., CLA), we keep
+# a cache of its cholesky decomposition L, k_mm = L @ L.T, here
+_PREDICT_GP_CACHE = {}
+
+
+def predict_gp(x, x_train, kernel, mu, coefs, sigma, cache_key=None):
+    """predict with Gaussian Process regression
+
+    Args:
+        x: new point, shape (1, n_features)
+        x_train: training points, shape (n_train, n_features)
+        kernel: callable with signature k(x, x_train) that computes the
+                kernel
+        mu: target mean
+        coefs: linear coefficients
+        sigma: standard deviation of the noise
+        cache_key: tuple for caching the train kernel
+    Returns:
+        mean: the GP posterior mean
+        variance: the GP posterior variance
+    """
+    k_nm = kernel(x, x_train)
+    mean = np.dot(k_nm, coefs) + mu
+
+    if cache_key is not None and cache_key in _PREDICT_GP_CACHE.keys():
+        # get the choleksy decomposition from the cache
+        L_m = _PREDICT_GP_CACHE[cache_key]
+
+    else:
+        # compute cholesky decomposition of train kernel
+        k_mm = kernel(x_train, x_train)
+        k_mm += (sigma**2 + 1e-8) * np.eye(k_mm.shape[0])
+        L_m = scipy_la.cholesky(k_mm, lower=True)
+
+        if cache_key is not None:
+            # update cache
+            _PREDICT_GP_CACHE[cache_key] = L_m
+
+    # Compute the variance.
+    G_mn = scipy_la.solve_triangular(L_m, k_nm.T, lower=True)
+    variance = kernel(x, x) - np.dot(G_mn.T, G_mn)
+
+    return mean, variance
+
+
+#
+# Site energy prediction in vacuum and environment
+#
+
+
+def predict_site_energies_chlorophyll_vac(encoding, model_params, residue_id, chl):
+    # define a kernel functions that takes x and x_train only
+    kernel_func = partial(
+        matern52_kernel,
+        lengthscale=model_params["lengthscale"],
+        variance=model_params["variance"],
+    )
+
+    # define the key for caching the cholesky decomposition of k_train
+    cache_key = (chl.upper(), "VAC")
+
+    # mean and variance from gaussian process
+    mean, variance = predict_gp(
+        encoding,
+        x_train=model_params["x_train"],
+        kernel=kernel_func,
+        mu=model_params["mu"],
+        coefs=model_params["coefs"],
+        sigma=model_params["sigma"],
+        cache_key=cache_key,
+    )
+
+    return mean, variance
+
+
+def predict_site_energies_chlorophyll_env_shift(
+    encoding, model_params, residue_id, chl
+):
+    # define a kernel function that takes x and x_train only
+    kernel_func = partial(
+        m52cm_linpot_kernel,
+        variance_lin=model_params["variance_lin"],
+        variance_m52=model_params["variance_m52"],
+        lengthscale_m52=model_params["lengthscale_m52"],
+        cm_dims=model_params["cm_dims"],
+        pot_dims=model_params["pot_dims"],
+    )
+
+    # define the key for caching the cholesky decomposition of k_train
+    cache_key = (chl.upper(), "ENV")
+
+    # mean and variance from gaussian process
+    mean, variance = predict_gp(
+        encoding,
+        x_train=model_params["x_train"],
+        kernel=kernel_func,
+        mu=model_params["mu"],
+        coefs=model_params["coefs"],
+        sigma=model_params["sigma"],
+        cache_key=cache_key,
+    )
+
+    return mean, variance
+
+
+# specialize for chl a and b
+# vac
+predict_site_energies_cla_vac = partial(
+    predict_site_energies_chlorophyll_vac,
+    chl="CLA",
+)
+predict_site_energies_chl_vac = partial(
+    predict_site_energies_chlorophyll_vac,
+    chl="CHL",
+)
+# env shift
+predict_site_energies_cla_env_shift = partial(
+    predict_site_energies_chlorophyll_env_shift,
+    chl="CLA",
+)
+predict_site_energies_chl_env_shift = partial(
+    predict_site_energies_chlorophyll_env_shift,
+    chl="CHL",
+)
+
+_PREDICT_SITE_ENERGIES_FUNCS = {
+    ("CLA", "VAC"): predict_site_energies_cla_vac,
+    ("CHL", "VAC"): predict_site_energies_chl_vac,
+    ("CLA", "ENV"): predict_site_energies_cla_env_shift,
+    ("CHL", "ENV"): predict_site_energies_chl_env_shift,
+}
+
+#
+# wrapper
+#
+
+
+def predict_site_energies(encoding, type, model_params, residue_id, kind):
     """
     Predict the site energy of each molecule with Gaussian Process Regression.
     Arguments
@@ -25,24 +254,31 @@ def predict_site_energies(encodings, types, residue_ids, kind):
                   Dictionary with mean and variance of each
                   prediction.
     """
-    # Load the models once in order to save time
-    models = {t: get_site_model(t, kind=kind) for t in types}
 
     iterator = pbar(
-        zip(encodings, types, residue_ids),
-        total=len(encodings),
+        encoding,
+        total=encoding.shape[0],
         desc=": Predicting siten",
         ncols=79,
     )
 
-    site_energies = defaultdict(list)
-    for encoding, type, residue_id in iterator:
-        iterator.set_postfix(residue_id=f"{residue_id}")
-        model = models[type]
-        y, y_var = model.predict_f_compiled(encoding)
-        site_energies["y_mean"].append(y)
-        site_energies["y_var"].append(y_var)
-    return site_energies
+    siten = defaultdict(list)
+
+    func = _PREDICT_SITE_ENERGIES_FUNCS[(type.upper(), kind.upper())]
+
+    for x in iterator:
+        # shape (1, n_features)
+        x = np.atleast_2d(x)
+
+        mean, variance = func(x, model_params, residue_id)
+
+        siten["y_mean"].append(mean)
+        siten["y_var"].append(variance)
+
+    for key in siten.keys():
+        siten[key] = np.concatenate(siten[key], axis=0)
+
+    return siten
 
 
 def predict_tresp_charges(encodings, descriptors, types, residue_ids):
