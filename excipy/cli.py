@@ -605,7 +605,7 @@ def _compute_env_site_energies(sites_vac, sites_env_shift, args):
         for vac_e, shift_e in zip(sites_vac["y_mean"], sites_env_shift["y_mean"])
     ]
     sites_env["y_var"] = [
-        (vac_e**2 + shift_e**2) ** 0.5
+        vac_e + shift_e
         for vac_e, shift_e in zip(sites_vac["y_var"], sites_env_shift["y_var"])
     ]
     save_site_energies(
