@@ -40,7 +40,6 @@ from excipy.util import (
     load_as_exat,
     dump_exat_files,
     rescale_tresp,
-    select_molecules,
     read_molecule_types,
     Colors,
     get_dipoles,
@@ -136,6 +135,14 @@ def cli_parse(argv):
         # type=list,
         nargs="+",
         help="Residues pairs you want to compute the couplings on, e.g. 664_665, 664_666. Has the priority on --cutoff option.",
+    )
+
+    opt(
+        "--env_coup_threshold",
+        required=False,
+        default=1,
+        type=float,
+        help="Threshold for environment (both EE and Pol) couplings to be computed. Couplings below threshold are left as computed in vac.",
     )
 
     opt(
@@ -321,7 +328,7 @@ def print_end():
 # =============================================================================
 
 
-def compute_couplings(traj, args):
+def compute_couplings(traj, args):  # noqa: C901
 
     print_section("COULOMB COUPLINGS")
 
@@ -399,6 +406,19 @@ def compute_couplings(traj, args):
     env_tr_dipoles = get_dipoles(coords, env_tresp)
     save_dipoles(env_tr_dipoles, args.residue_ids, kind="env", outfile=args.outfile)
 
+    # Identify couplings above a chosen threshold (by taking the max value on the traj)
+    # We will compute env and pol couplings only for these latter
+
+    # Select the couplings above the threshold in at least one frame
+    max_coup = abs(np.array(predicted_couplings)).max(axis=1)
+    threshold_mask = np.where(max_coup > args.env_coup_threshold)[0]
+
+    # Create a list of couplings above threshold to rescale
+    above_threshold_couplings = [predicted_couplings[pos] for pos in threshold_mask]
+
+    # Keep trace of the pair ids we selected
+    above_threshold_pairs_ids = [pairs_ids[pos] for pos in threshold_mask]
+
     # Do not compute couplings if there is only one molecule
     if len(coords) < 2:
         pass
@@ -407,18 +427,30 @@ def compute_couplings(traj, args):
         if predicted_couplings is None:
             pass
         else:
-            # Indices of the molecules for which we have computed the coupling
-            pairs_idx = select_molecules(args.residue_ids, pairs_ids)
-            # Scalings and environment couplings
+
+            # Create a list of the pair indeces above the threshold
+            above_threshold_pairs_idx = []
+            for p in above_threshold_pairs_ids:
+                above_threshold_pairs_idx.append(
+                    (args.residue_ids.index(p[0]), args.residue_ids.index(p[1]))
+                )
+
             coup_scalings = [
-                env_scalings[idx[0]] * env_scalings[idx[1]] for idx in pairs_idx
+                env_scalings[idx[0]] * env_scalings[idx[1]]
+                for idx in above_threshold_pairs_idx
             ]
+
             env_couplings = np.asarray(
-                [c * s for c, s in zip(predicted_couplings, coup_scalings)]
+                [c * s for c, s in zip(above_threshold_couplings, coup_scalings)]
             )
-            print_predicted_couplings(env_couplings, pairs_ids, kind="V_env")
+            print_predicted_couplings(
+                env_couplings, above_threshold_pairs_ids, kind="V_env"
+            )
             save_coulomb_couplings(
-                env_couplings, pairs_ids, kind="env", outfile=args.outfile
+                env_couplings,
+                above_threshold_pairs_ids,
+                kind="env",
+                outfile=args.outfile,
             )
 
     # We compute the MMPol contribution to each coupling
@@ -429,12 +461,14 @@ def compute_couplings(traj, args):
             pass
         # We compute this coupling only if we have
         # computed some couplings before
-        elif predicted_couplings is None:
+        elif above_threshold_couplings is None:
             pass
         else:
             # We compute this coupling only for those
             # pairs for which we have computed the environment coupling
-            pairs_idx = select_molecules(args.residue_ids, pairs_ids)
+
+            # pairs_idx = select_molecules(args.residue_ids, pairs_ids)
+
             print_action("Computing MMPol contribution")
             # MMPol contributions
             mmpol_couplings = compute_mmpol_couplings(
@@ -443,21 +477,32 @@ def compute_couplings(traj, args):
                 charges=env_tresp,
                 residue_ids=args.residue_ids,
                 masks=masks,
-                pairs=pairs_idx,
+                pairs=above_threshold_pairs_idx,
                 pol_threshold=args.pol_cutoff,
             )
-            print_predicted_couplings(mmpol_couplings, pairs_ids, kind="V_mmpol")
+            print_predicted_couplings(
+                mmpol_couplings, above_threshold_pairs_ids, kind="V_mmpol"
+            )
             save_coulomb_couplings(
-                mmpol_couplings, pairs_ids, kind="pol_shift", outfile=args.outfile
+                mmpol_couplings,
+                above_threshold_pairs_ids,
+                kind="pol_shift",
+                outfile=args.outfile,
             )
 
             # We also output the total coupling
             tot_couplings = []
             for coul, mmp in zip(env_couplings, mmpol_couplings):
                 tot_couplings.append(np.asarray(coul) + np.asarray(mmp))
-            print_predicted_couplings(tot_couplings, pairs_ids, kind="V_tot")
+
+            # Before saving we must recover couplings below the threshold (they will be left as vac)
+            all_couplings = np.array(predicted_couplings.copy())
+            for i, env_coup in enumerate(threshold_mask):
+                all_couplings[env_coup] = np.array(tot_couplings)[i]
+            all_couplings = list(all_couplings)
+            print_predicted_couplings(all_couplings, pairs_ids, kind="V_tot")
             save_coulomb_couplings(
-                tot_couplings, pairs_ids, kind="env_pol", outfile=args.outfile
+                all_couplings, pairs_ids, kind="env_pol", outfile=args.outfile
             )
 
 
