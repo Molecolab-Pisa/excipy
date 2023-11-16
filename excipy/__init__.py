@@ -2,14 +2,7 @@ import sys
 import os
 import logging
 
-# Disable Tensorflow warnings, infos, messages
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-
 import numpy as np
-import tensorflow as tf
-import gpflow
-
-gpflow.config.set_default_float(np.float64)
 
 from . import database
 from . import descriptors
