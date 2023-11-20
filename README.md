@@ -61,21 +61,22 @@ These quantities can be computed along all-atom Molecular Dynamics trajectories.
     888         d88P Y88b  Y88b  d88P  888   888           888
     8888888888 d88P   Y88b  "Y8888P" 8888888 888           888
 
-usage: /home/software/miniconda3/envs/excipy/bin/excipy [-h] -c COORDINATES -p
-                                                        PARAMETERS -r
-                                                        RESIDUE_IDS
-                                                        [RESIDUE_IDS ...]
-                                                        [-f FRAMES [FRAMES ...]]
-                                                        [-t TURNOFF_MASK]
-                                                        [--cutoff CUTOFF]
-                                                        [--no_coup]
-                                                        [--no_siten]
-                                                        [--pol_cutoff POL_CUTOFF]
-                                                        [--no_coup_pol]
-                                                        [--no_site_pol]
-                                                        [--no_site_env]
-                                                        [--database_folder DATABASE_FOLDER]
-                                                        [--outfile OUTFILE]
+usage: /home/e.betti/.conda/envs/excipy/bin/excipy [-h] -c COORDINATES -p
+                                                   PARAMETERS -r RESIDUE_IDS
+                                                   [RESIDUE_IDS ...]
+                                                   [-f FRAMES [FRAMES ...]]
+                                                   [-t TURNOFF_MASK]
+                                                   [--cutoff CUTOFF]
+                                                   [--coup_list COUP_LIST [COUP_LIST ...]]
+                                                   [--env_coup_threshold ENV_COUP_THRESHOLD]
+                                                   [--no_coup] [--no_siten]
+                                                   [--pol_cutoff POL_CUTOFF]
+                                                   [--no_coup_pol]
+                                                   [--no_site_pol]
+                                                   [--no_site_env]
+                                                   [--database_folder DATABASE_FOLDER]
+                                                   [--outfile OUTFILE]
+
 
 Regression-based estimation of the Coulomb coupling.
 
@@ -108,6 +109,10 @@ optional:
                         Residues pairs you want to compute the couplings on,
                         e.g. 664_665, 664_666. Has the priority on --cutoff
                         option.
+  --env_coup_threshold ENV_COUP_THRESHOLD
+                        Threshold for environment (both EE and Pol) couplings
+                        to be computed. Couplings below threshold are left as
+                        computed in vac.
   --no_coup             Whether to skip computing Coulomb couplings between
                         chlorophylls.
   --no_siten            Whether to skip computing site energies between
