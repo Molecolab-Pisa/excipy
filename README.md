@@ -3,9 +3,9 @@
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-**Authors**: Edoardo Cignoni, Lorenzo Cupellini, Benedetta Mennucci
+**Authors**: Edoardo Cignoni, Elena Betti, Lorenzo Cupellini, Benedetta Mennucci
 
-Machine-learning models for a fast estimation of excitonic Hamiltonians [1].
+Machine-learning models for a fast estimation of excitonic Hamiltonians [1, 2].
 Excipy provides estimates of site energies and excitonic couplings for chlorophylls *a* and *b* in vacuum, in electrostatic embedding QM/MM (EE QM/MM), and in polarizable embedding QM/MM (QM/MMPol).
 
 ## Install
@@ -46,7 +46,7 @@ The executable computes:
 * Vacuum, EE QM/MM, and QM/MMPol excitation energies;
 
 Currently, `excipy` models are trained on chlorophylls *a* and *b*.
-For a description of the ML models implemented in `excipy`, we refer to Refs. [1] and __FILLME__.
+For a description of the ML models implemented in `excipy`, we refer to Refs. [1] and [2].
 These quantities can be computed along all-atom Molecular Dynamics trajectories.
 
 #### CLI: usage

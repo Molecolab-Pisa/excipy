@@ -48,9 +48,9 @@ entry_points = {
 
 setup(
     name="excipy",
-    version="1.5.0",
-    author="Edoardo Cignoni, Lorenzo Cupellini, Benedetta Mennucci",
-    author_email="edoardo.cignoni96@gmail.com",
+    version="1.5.1",
+    author="Edoardo Cignoni, Elena Betti, Lorenzo Cupellini, Benedetta Mennucci",
+    author_email="edoardo.cignoni96@gmail.com,elena15.be@gmail.com",
     packages=packages,
     package_data=package_data,
     ext_modules=ext_modules,
