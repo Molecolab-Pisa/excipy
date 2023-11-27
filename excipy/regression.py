@@ -203,7 +203,7 @@ def predict_site_energies_chlorophyll_env_shift(
     return mean, variance
 
 
-# specialize for chl a and b
+# specialize for chl a and b and bcl
 # vac
 predict_site_energies_cla_vac = partial(
     predict_site_energies_chlorophyll_vac,
@@ -212,6 +212,10 @@ predict_site_energies_cla_vac = partial(
 predict_site_energies_chl_vac = partial(
     predict_site_energies_chlorophyll_vac,
     chl="CHL",
+)
+predict_site_energies_bcl_vac = partial(
+    predict_site_energies_chlorophyll_vac,
+    chl="BLC",
 )
 # env shift
 predict_site_energies_cla_env_shift = partial(
@@ -222,12 +226,18 @@ predict_site_energies_chl_env_shift = partial(
     predict_site_energies_chlorophyll_env_shift,
     chl="CHL",
 )
+predict_site_energies_bcl_env_shift = partial(
+    predict_site_energies_chlorophyll_env_shift,
+    chl="BCL",
+)
 
 _PREDICT_SITE_ENERGIES_FUNCS = {
     ("CLA", "VAC"): predict_site_energies_cla_vac,
     ("CHL", "VAC"): predict_site_energies_chl_vac,
+    ("BCL", "VAC"): predict_site_energies_bcl_vac,
     ("CLA", "ENV"): predict_site_energies_cla_env_shift,
     ("CHL", "ENV"): predict_site_energies_chl_env_shift,
+    ("BCL", "ENV"): predict_site_energies_bcl_env_shift,
 }
 
 #
