@@ -26,9 +26,7 @@ package_data = {
         "database/atom_names/*.json",
         "database/parameters/*.json",
         "database/rescalings/*.json",
-        "database/models/*",
-        "database/models/*/*/*",
-        "database/models/*/*.pb",
+        "database/models/*/*.npz",
     ]
 }
 
