@@ -616,7 +616,7 @@ def _compute_env_site_shift(traj, masks, internal_encodings, types, args):
         save_site_energies(
             site_env_shift["y_mean"],
             site_env_shift["y_var"],
-            (residue_id,),
+            residue_id,
             kind="env_shift",
             outfile=args.outfile,
         )
@@ -653,13 +653,20 @@ def _compute_env_site_energies(sites_vac, sites_env_shift, args):
         vac_e + shift_e
         for vac_e, shift_e in zip(sites_vac["y_var"], sites_env_shift["y_var"])
     ]
-    save_site_energies(
-        sites_env["y_mean"],
-        sites_env["y_var"],
-        args.residue_ids,
-        kind="env",
-        outfile=args.outfile,
-    )
+    if (len(sites_env["y_mean"]) != len(args.residue_ids)) or (
+        len(sites_env["y_var"]) != len(args.residue_ids)
+    ):
+        raise RuntimeError
+    for y_mean, y_var, residue_id in zip(
+        sites_env["y_mean"], sites_env["y_var"], args.residue_ids
+    ):
+        save_site_energies(
+            y_mean,
+            y_var,
+            residue_id,
+            kind="env",
+            outfile=args.outfile,
+        )
     return sites_env
 
 
@@ -699,13 +706,20 @@ def _compute_mmp_site_shift(traj, coords, masks, types, args, charges):
         "y_mean": mmp_site_shifts,
         "y_var": [np.zeros(s.shape) for s in mmp_site_shifts],
     }
-    save_site_energies(
-        mmp_site_shifts["y_mean"],
-        mmp_site_shifts["y_var"],
-        args.residue_ids,
-        kind="env_pol_shift",
-        outfile=args.outfile,
-    )
+    if (len(mmp_site_shifts["y_mean"]) != len(args.residue_ids)) or (
+        len(mmp_site_shifts["y_var"]) != len(args.residue_ids)
+    ):
+        raise RuntimeError
+    for y_mean, y_var, residue_id in zip(
+        mmp_site_shifts["y_mean"], mmp_site_shifts["y_var"], args.residue_ids
+    ):
+        save_site_energies(
+            y_mean,
+            y_var,
+            residue_id,
+            kind="env_pol_shift",
+            outfile=args.outfile,
+        )
     return mmp_site_shifts
 
 
@@ -745,13 +759,20 @@ def _compute_mmp_site_energies(sites_vac, sites_env_shift, sites_mmp_shift, args
         vac_e + shift_e
         for vac_e, shift_e in zip(sites_vac["y_var"], sites_env_shift["y_var"])
     ]
-    save_site_energies(
-        sites_mmp["y_mean"],
-        sites_mmp["y_var"],
-        args.residue_ids,
-        kind="env_pol",
-        outfile=args.outfile,
-    )
+    if (len(sites_mmp["y_mean"]) != len(args.residue_ids)) or (
+        len(sites_mmp["y_var"]) != len(args.residue_ids)
+    ):
+        raise RuntimeError
+    for y_mean, y_var, residue_id in zip(
+        sites_mmp["y_mean"], sites_mmp["y_var"], args.residue_ids
+    ):
+        save_site_energies(
+            y_mean,
+            y_var,
+            residue_id,
+            kind="env_pol",
+            outfile=args.outfile,
+        )
     return sites_mmp
 
 
