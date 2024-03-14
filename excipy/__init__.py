@@ -27,3 +27,11 @@ except ImportError:
         " contribution to the Coulomb coupling."
     )
     available_polarizable_module = False
+
+try:
+    from . import intf_ommp
+
+    available_intf_ommp = True
+except ImportError:
+    logging.warning("pyopenmmpol is not available.")
+    available_intf_ommp = False

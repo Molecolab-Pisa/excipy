@@ -126,6 +126,7 @@ def _compute_polarizabilities(topology, poldict=WANGAL):
     """
     atoms = topology.atoms
     polarizabilities = []
+    # aa = []
     for atom in atoms:
         atnum = atom.atomic_number
         # If uncommenting this if-else, the next "if"
@@ -159,7 +160,8 @@ def _compute_polarizabilities(topology, poldict=WANGAL):
             else:
                 pol = 0.0
         polarizabilities.append(pol)
-    return np.asarray(polarizabilities)
+        # aa.append((atnum, pol, topology.residue(atom.resid)))
+    return np.array(polarizabilities)  # np.array(aa)
 
 
 def compute_polarizabilities(topology, poldict=WANGAL):
