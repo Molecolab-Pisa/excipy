@@ -326,7 +326,6 @@ def compute_coulomb_couplings(coords, charges, residue_ids, cutoff, coupling_lis
     """
 
     if coupling_list is None:
-
         num_molecules = len(coords)
         pairs = [
             (i, j)
@@ -337,7 +336,6 @@ def compute_coulomb_couplings(coords, charges, residue_ids, cutoff, coupling_lis
         molecule_pairs = apply_distance_cutoff(coords, residue_ids, pairs, cutoff)
 
     else:
-
         pairs = []
 
         for c in coupling_list:

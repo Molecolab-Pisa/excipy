@@ -329,7 +329,6 @@ def print_end():
 
 
 def compute_couplings(traj, args):  # noqa: C901
-
     print_section("COULOMB COUPLINGS")
 
     # Get the residue types (residue names)
@@ -427,7 +426,6 @@ def compute_couplings(traj, args):  # noqa: C901
         if predicted_couplings is None:
             pass
         else:
-
             # Create a list of the pair indeces above the threshold
             above_threshold_pairs_idx = []
             for p in above_threshold_pairs_ids:
@@ -456,7 +454,6 @@ def compute_couplings(traj, args):  # noqa: C901
     # We compute the MMPol contribution to each coupling
     # if we can make use of the polarization module
     if excipy.available_polarizable_module and not args.no_coup_pol:
-
         if len(coords) < 2:
             pass
         # We compute this coupling only if we have
@@ -1017,7 +1014,6 @@ def excipy2exat_block_average(exat_quantities, frames, args):
 
 
 def excipy2exat():
-
     logo()
 
     args, parser = excipy2exat_parse(sys.argv)
@@ -1052,7 +1048,6 @@ def excipy2exat():
 
 
 def main():
-
     logo()
 
     args, parser = cli_parse(sys.argv)
