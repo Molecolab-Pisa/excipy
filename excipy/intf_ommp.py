@@ -1,6 +1,9 @@
 from __future__ import annotations
 from typing import Tuple, Any
+import os
 import warnings
+import multiprocessing
+from itertools import repeat
 
 import pytraj as pt
 
@@ -275,6 +278,7 @@ class OMMPInterface:
         mmp_fname: str,
         db: str = None,
         mol2: str = None,
+        ommp_set_verbose: int = 1,
     ) -> None:
         """
         Args:
@@ -293,6 +297,9 @@ class OMMPInterface:
         self.mmp_fname = mmp_fname
         self.db = db
         self.mol2 = mol2
+        self.ommp_set_verbose = ommp_set_verbose
+
+        ommp.set_verbose = ommp_set_verbose
 
         # read electrostatics
         if db is None:
@@ -363,7 +370,7 @@ class OMMPInterface:
         compl_idx = top.select(compl_mask)
         return idx, compl_idx
 
-    def potential_approx_ipd(self, coords: np.ndarray):
+    def potential_approx_ipd(self, coords: np.ndarray, mmp_postfix: int = None, return_system: bool = False):
         """potential of approximate induced dipoles on the qm atoms
 
         Computes the potential of approximate induced dipoles on the qm
@@ -421,8 +428,14 @@ class OMMPInterface:
         connectivity = np.zeros((qmmm_top.n_atoms, 8))
         connectivity[:, :maxc] = conn
 
+        if mmp_postfix is None:
+            mmp_fname = self.mmp_fname
+        else:
+            mmp_fname, ext = os.path.splitext(self.mmp_fname)
+            mmp_fname = mmp_fname + "_{:07d}".format(mmp_postfix) + ext
+
         write_mmp_input(
-            fname=self.mmp_fname,
+            fname=mmp_fname,
             atomic_numbers=atomic_numbers,
             coordinates=coordinates,
             resid=resids,
@@ -432,12 +445,41 @@ class OMMPInterface:
         )
 
         # zero field from the qm part because the qm is treated as mm
-        system = ommp.OMMPSystem(self.mmp_fname)
+        system = ommp.OMMPSystem(mmp_fname)
         zero_ext_field = np.zeros((system.pol_atoms, 3))
         system.set_external_field(zero_ext_field)
         elecpot = system.potential_pol2ext(qm_coords)
 
-        return elecpot, system
+        # clean after yourself
+        os.remove(mmp_fname)
+
+        if return_system:
+            return elecpot, system
+
+        return elecpot
+
+
+    def potential_approx_ipd_along_traj(self, traj: np.ndarray, parallel=False, nprocs=4):
+        if parallel:
+            pool = multiprocessing.Pool(processes=nprocs)
+            pot = pool.starmap(
+                    self.potential_approx_ipd,
+                    zip(traj, range(traj.shape[0]), repeat(False))
+                    )
+            pool.close()
+            pool.join()
+            pot = np.asarray(pot)
+            return pot
+        else:
+            pot = []
+            for coords in traj:
+                pot_ = self.potential_approx_ipd(coords, mmp_postfix=None, return_system=False)
+                pot.append(pot_)
+            pot = np.asarray(pot)
+            return pot
+
+        
+
 
 
 #     def approximate_induced_dipoles2(self, coords: np.ndarray):
