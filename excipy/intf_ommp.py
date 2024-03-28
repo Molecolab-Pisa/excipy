@@ -12,7 +12,7 @@ from scipy.spatial.distance import cdist
 import pyopenmmpol as ommp
 
 from .clib.retain_full_residues import retain_full_residues_cy
-from .polar import compute_polarizabilities
+from .polar import compute_polarizabilities, ANG2BOHR
 from .util import build_connectivity_matrix
 
 
@@ -398,7 +398,7 @@ class OMMPInterface:
         # indices of the polarizable atoms in the original topology
         pol_idx = env_idx[mm_idx][pol_idx]
         # retain the qm part and all the mm part
-        retain_idx = np.sort(np.concatenate((qm_idx, env_idx[mm_idx])))
+        retain_idx = env_idx[mm_idx]
 
         # static charges
         static_charges = self.charges.copy()
@@ -418,14 +418,9 @@ class OMMPInterface:
             indices=retain_idx,
         )
 
-        #  topology with the qm and the mm parts
-        qmmm_mask = (
-            "(" + self.qm_mask + ") | @" + ",".join((env_idx[mm_idx] + 1).astype(str))
-        )
-        qmmm_top = self.top[qmmm_mask]
-        conn = build_connectivity_matrix(qmmm_top, count_as="python") + 1
+        conn = build_connectivity_matrix(mm_top, count_as="python") + 1
         maxc = conn.shape[1]
-        connectivity = np.zeros((qmmm_top.n_atoms, 8))
+        connectivity = np.zeros((mm_top.n_atoms, 8))
         connectivity[:, :maxc] = conn
 
         if mmp_postfix is None:
@@ -444,11 +439,17 @@ class OMMPInterface:
             connectivity=connectivity,
         )
 
-        # zero field from the qm part because the qm is treated as mm
         system = ommp.OMMPSystem(mmp_fname)
-        zero_ext_field = np.zeros((system.pol_atoms, 3))
-        system.set_external_field(zero_ext_field)
-        elecpot = system.potential_pol2ext(qm_coords)
+
+        # the qm part is treated as mm (collection of point charges)
+        # we compute the external field as the field of that collection of charges
+        qm_helper = ommp.OMMPQmHelper(coord_qm=qm_coords*ANG2BOHR, charge_qm=self.charges[qm_idx], z_qm=self.atomic_numbers[qm_idx])
+        qm_helper.prepare_qm_ele_ene(system)
+        system.set_external_field(qm_helper.E_n2p)
+
+        # keep in atomic units to be consistent with the
+        # electrostatic potential descriptor
+        elecpot = system.potential_pol2ext(qm_coords*ANG2BOHR) # [e / Bohr]
 
         # clean after yourself
         os.remove(mmp_fname)
@@ -457,6 +458,95 @@ class OMMPInterface:
             return elecpot, system
 
         return elecpot
+
+
+    # def potential_approx_ipd(self, coords: np.ndarray, mmp_postfix: int = None, return_system: bool = False):
+    #     """potential of approximate induced dipoles on the qm atoms
+
+    #     Computes the potential of approximate induced dipoles on the qm
+    #     atoms. The induced dipoles are termed "approximate" as the qm
+    #     part is treated as a classical collection of static charges with
+    #     no polarizability.
+
+    #     Args:
+    #         coords : coordinates of the whole system, shape (n_atoms, 3)
+
+    #     Returns:
+    #         elecpot: potential of the induced dipoles on the qm atoms,
+    #                  shape (n_qm,)
+    #         system: OMMPSystem object with the approximate induced dipoles
+    #     """
+    #     num_mm, qm_coords, mm_coords, mm_top, mm_idx = self._mm_cutoff(coords=coords)
+    #     num_pol, pol_coords, pol_top, pol_idx = self._pol_cutoff(
+    #         qm_coords=qm_coords, mm_coords=mm_coords, mm_top=mm_top
+    #     )
+
+    #     # indices of the qm part and the environment part in the original topology
+    #     qm_idx, env_idx = self._get_selection_and_complement(
+    #         top=self.top, mask=self.qm_mask
+    #     )
+    #     # indices of the polarizable atoms in the original topology
+    #     pol_idx = env_idx[mm_idx][pol_idx]
+    #     # retain the qm part and all the mm part
+    #     retain_idx = np.sort(np.concatenate((qm_idx, env_idx[mm_idx])))
+
+    #     # static charges
+    #     static_charges = self.charges.copy()
+    #     static_charges[pol_idx] = self.pol_charges[pol_idx].copy()
+
+    #     # polarizabilities
+    #     alpha = np.zeros(self.top.n_atoms, dtype=np.float64)
+    #     alpha[pol_idx] = self.alphas[pol_idx].copy()
+
+    #     # restrict the selection
+    #     atomic_numbers, resids, coordinates, static_charges, alpha = _filter_indices(
+    #         self.atomic_numbers,
+    #         self.resids,
+    #         coords,
+    #         static_charges,
+    #         alpha,
+    #         indices=retain_idx,
+    #     )
+
+    #     #  topology with the qm and the mm parts
+    #     qmmm_mask = (
+    #         "(" + self.qm_mask + ") | @" + ",".join((env_idx[mm_idx] + 1).astype(str))
+    #     )
+    #     qmmm_top = self.top[qmmm_mask]
+    #     conn = build_connectivity_matrix(qmmm_top, count_as="python") + 1
+    #     maxc = conn.shape[1]
+    #     connectivity = np.zeros((qmmm_top.n_atoms, 8))
+    #     connectivity[:, :maxc] = conn
+
+    #     if mmp_postfix is None:
+    #         mmp_fname = self.mmp_fname
+    #     else:
+    #         mmp_fname, ext = os.path.splitext(self.mmp_fname)
+    #         mmp_fname = mmp_fname + "_{:07d}".format(mmp_postfix) + ext
+
+    #     write_mmp_input(
+    #         fname=mmp_fname,
+    #         atomic_numbers=atomic_numbers,
+    #         coordinates=coordinates,
+    #         resid=resids,
+    #         static_charges=static_charges,
+    #         polarizabilities=alpha,
+    #         connectivity=connectivity,
+    #     )
+
+    #     # zero field from the qm part because the qm is treated as mm
+    #     system = ommp.OMMPSystem(mmp_fname)
+    #     zero_ext_field = np.zeros((system.pol_atoms, 3))
+    #     system.set_external_field(zero_ext_field)
+    #     elecpot = system.potential_pol2ext(qm_coords)
+
+    #     # clean after yourself
+    #     os.remove(mmp_fname)
+
+    #     if return_system:
+    #         return elecpot, system
+
+    #     return elecpot
 
 
     def potential_approx_ipd_along_traj(self, traj: np.ndarray, parallel=False, nprocs=4):
