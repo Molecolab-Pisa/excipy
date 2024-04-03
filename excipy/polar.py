@@ -7,40 +7,11 @@ from .util import ANG2BOHR, HARTREE2CM_1
 from .util import (
     make_pair_mask,
     build_connectivity_matrix,
-    atomnum2atomsym,
     _count_as,
     _pad_list_of_lists,
     pbar,
 )
-
-
-# =============================================================================
-# Polarization models
-# for now only WangAL is supported.
-# =============================================================================
-
-WANGAL = {
-    "B": 2.24204,  # Boron (J Phys Chem A, 103, 2141)
-    "Mg": 0.1200,  # Magnesium (???)
-    "C1": 1.3916,  # sp1 Carbon
-    "C2": 1.2955,  # sp2 Carbon
-    "C3": 0.9399,  # sp3 Carbon
-    "H": 0.4255,  #
-    "NO": 1.4824,  # Nitro Nitrogen
-    "N": 0.9603,  # Other Nitrogen
-    "O2": 0.6049,  # sp2 Oxygen
-    "O3": 0.6148,  # sp3 Oxygen
-    "F": 0.4839,  #
-    "Cl": 2.3707,  #
-    "Br": 3.5016,  #
-    "I": 5.5788,  #
-    "S4": 2.3149,  # S in sulfone
-    "S": 3.1686,  # Other S
-    "P": 1.7927,  #
-    "Zn": 0.2600,  # Zinc (II) from AMOEBA (JCTC, 6, 2059)
-}
-
-WANGAL_FACTOR = 2.5874
+from .elec import compute_polarizabilities, WANGAL_FACTOR
 
 
 # =============================================================================
@@ -73,123 +44,6 @@ def compute_environment_mask(topology, mask1, mask2):
     return env_mask
 
 
-def _water_polarizability(atnum):
-    """
-    Get the atomic polarizability for a water atom.
-    NOTE: currently not used but kept here for reference.
-    """
-    if atnum == 8:
-        return 1.49073
-    elif atnum == 1:
-        return 0.0
-    else:
-        raise RuntimeError("Water atom is neither oxygen nor hydrogen.")
-
-
-def _nitro_sulfone_symbol(topology, atom):
-    """
-    Get the atomic symbol for a nitro or sulfone atom
-    """
-    atnum = atom.atomic_number
-    sym = atomnum2atomsym[atnum]
-    bonded_atoms = _get_bonded_atoms(atom, topology)
-    bonded_oxy_atoms = [a for a in bonded_atoms if a.atomic_number == 8]
-    num_oxygens = len(bonded_oxy_atoms)
-    if num_oxygens == 2:
-        # We need two oxygens with valence one
-        oxy_n_bonds = [a.n_bonds for a in bonded_oxy_atoms]
-        if oxy_n_bonds == [1, 1]:
-            # Real nitro/sulfone
-            if sym == "N":
-                return "NO"
-            else:
-                return "S4"
-        else:
-            return sym
-    else:
-        return sym
-
-
-def _compute_polarizabilities(topology, poldict=WANGAL):
-    """
-    Assign the atomic polarizability for each atom in the topology.
-    Arguments
-    ---------
-    topology  : pytraj.Topology
-              Trajectory topology
-    poldict   : dict
-              Dictionary mapping atom symbols to polarizabilities
-    Returns
-    -------
-    polarizabilities : ndarray, (num_atoms,)
-                     Atomic polarizabilities
-    """
-    atoms = topology.atoms
-    polarizabilities = []
-    # aa = []
-    for atom in atoms:
-        atnum = atom.atomic_number
-        # If uncommenting this if-else, the next "if"
-        # resname = atom.resname
-        # should become an "elif"
-        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        ## Waters get their own parameters                  # noqa: E266
-        # if resname in ['WAT', 'WCR']:
-        #    pol = _water_polarizability(atnum)
-        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        # Simple case, no ambiguities due to
-        # hybridization of the atom:
-        #            H  B  F  Mg  P   Cl  Br  I
-        if atnum in [1, 5, 9, 12, 15, 17, 35, 53]:
-            sym = atomnum2atomsym[atnum]
-            pol = poldict[sym]
-        # Cases with more than one type
-        else:
-            if atnum == 6:  # C
-                sym = "C{:1d}".format(atom.n_bonds - 1)
-            elif atnum == 8:  # O
-                sym = "O{:1d}".format(atom.n_bonds + 1)
-            # Distinguish nitro and sulfone
-            elif atnum in [7, 16]:  # N, S
-                sym = _nitro_sulfone_symbol(topology, atom)
-            # Polarizability not present for this atom
-            else:
-                sym = None
-            if sym is not None:
-                pol = poldict[sym]
-            else:
-                pol = 0.0
-        polarizabilities.append(pol)
-        # aa.append((atnum, pol, topology.residue(atom.resid)))
-    return np.array(polarizabilities)  # np.array(aa)
-
-
-def compute_polarizabilities(topology, poldict=WANGAL):
-    """
-    Assign the atomic polarizability for each atom in the topology.
-    Arguments
-    ---------
-    topology  : pytraj.Topology
-              Trajectory topology
-    poldict   : dict
-              Dictionary mapping atom symbols to polarizabilities
-    Returns
-    -------
-    polarizabilities : ndarray, (num_atoms,)
-                     Atomic polarizabilities
-    """
-    polarizabilities = _compute_polarizabilities(topology, poldict)
-    polarizabilities *= ANG2BOHR**3
-    return polarizabilities
-
-
-def _get_bonded_atoms(atom, topology):
-    """
-    Get the pytraj.Atom objects bonded to a pytraj.Atom.
-    """
-    return [topology.atom(i) for i in atom.bonded_indices()]
-
-
 def _angstrom2bohr(*arrays):
     """
     Convert from angstrom to bohr units an arbitrary number of arrays.
@@ -202,6 +56,7 @@ def _angstrom2bohr(*arrays):
 # =============================================================================
 
 
+# TODO: move in elec.py
 def _polarization_cutoff(
     coords, env_mask, pol_threshold, full_connect, polarizabilities
 ):
@@ -290,6 +145,7 @@ def _build_pol_neighbor_list(full_connect, cut_mask):
     return nn_list
 
 
+# TODO: move in elec.py
 def electric_field(target_coords, source_coords, source_charges):
     """
     Computes the electric fields at points `target_coords`
