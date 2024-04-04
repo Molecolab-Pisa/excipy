@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, cg
-from scipy.spatial.distance import cdist
 import pytraj as pt
 from .tmu import tmu as tmu_fortran
 from .util import ANG2BOHR, HARTREE2CM_1
@@ -11,7 +12,8 @@ from .util import (
     _pad_list_of_lists,
     pbar,
 )
-from .elec import compute_polarizabilities, WANGAL_FACTOR
+from .elec import compute_polarizabilities, WANGAL_FACTOR, electric_field
+from .selection import _spherical_cutoff
 
 
 # =============================================================================
@@ -54,48 +56,6 @@ def _angstrom2bohr(*arrays):
 # =============================================================================
 # MMPol Manipulation Functions
 # =============================================================================
-
-
-# TODO: move in elec.py
-def _polarization_cutoff(
-    coords, env_mask, pol_threshold, full_connect, polarizabilities
-):
-    """
-    Select the polarization part based on the `mmpol_threshold`.
-    Arguments
-    ---------
-    coords           : ndarray, (num_atoms, 3)
-                     Cartesian coordinates of the full system for a single frame.
-    env_mask         : ndarray, (num_atoms,)
-                     Mask that selects the environment atoms.
-    pol_threshold    : float
-                     Threshold for the polarization part.
-    full_connect     : ndarray, (num_atoms, max_connections)
-                     full connectivity matrix
-    polarizabilities : ndarray, (num_atoms,)
-                     Atomic polarizabilities
-    """
-    # Total number of atoms (env+pair)
-    num_atoms = len(env_mask)
-    env_idx = np.where(env_mask)[0]
-    # Coordinates of the environment and the chromophore pair
-    env_coords = coords[env_mask]
-    pair_coords = coords[~env_mask]
-    # Compute the distances between each atom of the pigment
-    # pair and every other atom of the environment
-    # dist is of shape (num_env_atoms, num_pair_atoms)
-    dist = cdist(env_coords, pair_coords)
-    # For each environment atom, find the minimum distance
-    # from the pair coordinates
-    # min_dist is of shape (num_env_atoms,)
-    min_dist = np.min(dist, axis=1)
-    # Keep atoms within the cutoff
-    keep_mask = min_dist <= pol_threshold
-    cut_mask = np.zeros(num_atoms, dtype=bool)
-    cut_mask[env_idx[keep_mask]] = True
-    # Exclude atoms with polarizability zero
-    cut_mask[polarizabilities == 0] = False
-    return cut_mask
 
 
 def _map_polarizable_atoms(cut_mask, count_as="fortran"):
@@ -143,33 +103,6 @@ def _build_pol_neighbor_list(full_connect, cut_mask):
         nn_list.append(n12 + n13)
     nn_list = _pad_list_of_lists(nn_list, fillvalue=-1) + 1
     return nn_list
-
-
-# TODO: move in elec.py
-def electric_field(target_coords, source_coords, source_charges):
-    """
-    Computes the electric fields at points `target_coords`
-    produced by a point charge distribution of point charges
-    `source_charges` localized at `source_coords`.
-    Arguments
-    ---------
-    target_coords  : ndarray, (num_targets, 3)
-                   Target coordinates
-    source_coords  : ndarray, (num_sources, 3)
-                   Source coordinates
-    source_charges : ndarray, (num_sources,)
-                   Source charges
-    Returns
-    -------
-    E              : ndarray, (num_targets, 3)
-                   Electric field at the target coordinates
-    """
-    dist = target_coords[:, None, :] - source_coords[None, :, :]
-    dist2 = np.sum(dist**2, axis=2)
-    dist3 = dist2 * dist2**0.5
-    ddist3 = dist / dist3[:, :, None]
-    E = np.sum(ddist3 * source_charges[None, :, None], axis=1)
-    return E
 
 
 # =============================================================================
@@ -269,6 +202,13 @@ def _compute_thole_factor(alpha):
     return fa * alpha**1.0 / 6.0
 
 
+def _compute_cut_mask(env_mask: np.ndarray, pol_idx: np.ndarray):
+    cut_mask = np.zeros(len(env_mask), dtype=bool)
+    selected = np.where(env_mask)[0][pol_idx]
+    cut_mask[selected] = True
+    return cut_mask
+
+
 def mmpol_coupling(
     coords,
     coords1,
@@ -306,13 +246,19 @@ def mmpol_coupling(
     """
     # Get the `cut_mask`, or polarization mask, that selects the polarizable
     # atoms within the given cutoff
-    cut_mask = _polarization_cutoff(
-        coords, env_mask, pol_threshold, full_connect, polarizabilities
+    num_pol, pol_coords, pol_idx = _spherical_cutoff(
+        source_coords=np.concatenate((coords1, coords2), axis=0),
+        ext_coords=coords[env_mask],
+        cutoff=pol_threshold,
     )
+    cut_mask = _compute_cut_mask(env_mask=env_mask, pol_idx=pol_idx)
+    # exclude atoms with polarizability of zero
+    alpha = polarizabilities[cut_mask]
+    cut_mask[polarizabilities == 0] = False
+    pol_coords = pol_coords[alpha != 0]
+    alpha = alpha[np.where(alpha != 0)[0]]
     # Compute the neighbor list of polarizable atoms, needed for the fortran routine
     nn_list = _build_pol_neighbor_list(full_connect, cut_mask)
-    pol_coords = coords[cut_mask]
-    alpha = polarizabilities[cut_mask]
     # Convert to Bohr
     pol_coords, coords1, coords2 = _angstrom2bohr(pol_coords, coords1, coords2)
     # Compute the electric fields of the two
@@ -341,10 +287,79 @@ def mmpol_coupling(
     return Vmmp * HARTREE2CM_1
 
 
-# Alias for site energies
-# The function is the same, is only called with coords1=coords2
-# and charges1=charges2
-mmpol_site_contribution = mmpol_coupling
+def mmpol_site_contribution(
+    coords,
+    coords1,
+    charges1,
+    polarizabilities,
+    env_mask,
+    pol_threshold,
+    full_connect,
+):
+    """
+    Compute the MMPol contribution to the TrEsp Coulomb coupling.
+    Arguments
+    ---------
+    coords           : ndarray, (num_atoms, 3)
+                     Cartesian coordinates of every atom
+    coords1          : ndarray, (num_atoms_1, 3)
+                     Cartesian coordinates of the first molecule
+    coords2          : ndarray, (num_atoms_2, 3)
+                     Cartesian coordinates of the second molecule
+    charges1         : ndarray, (num_atoms_1,)
+                     Charges of the first molecule
+    charges2         : ndarray, (num_atoms_2,)
+                     Charges of the second molecule
+    polarizabilities : ndarray, (num_atoms,)
+                     Atomic polarizabilities
+    env_mask         : ndarray, (num_atoms,)
+                     Environment mask, True if the atom belongs to the environment,
+                     False otherwise.
+    pol_threshold    : float
+                     Polarization threshold
+    full_connect     : ndarray, (num_atoms, max_connections)
+                     Connectivity matrix
+    """
+    # Get the `cut_mask`, or polarization mask, that selects the polarizable
+    # atoms within the given cutoff
+    num_pol, pol_coords, pol_idx = _spherical_cutoff(
+        source_coords=coords1,
+        ext_coords=coords[env_mask],
+        cutoff=pol_threshold,
+    )
+    cut_mask = _compute_cut_mask(env_mask=env_mask, pol_idx=pol_idx)
+    # exclude atoms with polarizability of zero
+    alpha = polarizabilities[cut_mask]
+    cut_mask[polarizabilities == 0] = False
+    pol_coords = pol_coords[alpha != 0]
+    alpha = alpha[np.where(alpha != 0)[0]]
+    # Compute the neighbor list of polarizable atoms, needed for the fortran routine
+    nn_list = _build_pol_neighbor_list(full_connect, cut_mask)
+    # Convert to Bohr
+    pol_coords, coords1 = _angstrom2bohr(pol_coords, coords1)
+    # Compute the electric fields of the two
+    # molecules at the positions of polarizable atoms
+    electric_field1 = electric_field(pol_coords, coords1, charges1)
+    alpha3 = np.column_stack((alpha, alpha, alpha))
+    num_atoms = len(alpha)
+    # We only support WangAL polar model for now
+    thole = _compute_thole_factor(alpha)
+    # Define linear operators for TMu and preconditioner
+    TT = TmuOperator(
+        n_atoms=num_atoms,
+        func=tmu_fortran_wrapper,
+        alpha=alpha,
+        thole=thole,
+        pol_coords=pol_coords,
+        iscreen=1,
+        nn_list=nn_list,
+        dodiag=True,
+    )
+    preconditioner = LinearOperator(TT.shape, matvec=lambda x: alpha3.ravel() * x)
+    # Solve preconditioned Conjugate Gradient
+    mu, info = cg(TT, electric_field1.ravel(), M=preconditioner, tol=1e-4)
+    Vmmp = -np.sum(mu * electric_field1.ravel())
+    return Vmmp * HARTREE2CM_1
 
 
 # =============================================================================
@@ -497,9 +512,7 @@ def compute_mmpol_site_energy(
     for i, frame in enumerate(iterator):
         full_coords = frame.xyz.copy()
         coords1 = coords[i]
-        coords2 = coords[i]
         charges1 = charges[i]
-        charges2 = charges[i]
         # Compute the environment mask
         env_mask = compute_environment_mask(
             topology,
@@ -509,9 +522,7 @@ def compute_mmpol_site_energy(
         site_mmp = mmpol_site_contribution(
             full_coords,
             coords1,
-            coords2,
             charges1,
-            charges2,
             polarizabilities,
             env_mask,
             pol_threshold,

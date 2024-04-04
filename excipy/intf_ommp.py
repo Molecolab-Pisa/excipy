@@ -8,7 +8,7 @@ import numpy as np
 import pyopenmmpol as ommp
 
 from .util import build_connectivity_matrix, ANG2BOHR
-from .selection import _mm_cutoff, _pol_cutoff
+from .selection import _whole_residues_mm_cutoff, _whole_residues_pol_cutoff
 from .elec import read_electrostatics
 
 
@@ -173,11 +173,11 @@ class OMMPInterface:
         alphas = self.alphas.copy()
 
 
-        qm_coords, mm_coords, qm_idx, mm_idx, mm_top = _mm_cutoff(
+        qm_coords, mm_coords, qm_idx, mm_idx, mm_top = _whole_residues_mm_cutoff(
             topology=self.top, coords=coords, qm_mask=self.qm_mask, mm_cut=self.mm_cut
         )
 
-        pol_coords, pol_top, pol_idx = _pol_cutoff(
+        pol_coords, pol_top, pol_idx = _whole_residues_pol_cutoff(
             mm_topology=mm_top,
             qm_coords=qm_coords,
             mm_coords=mm_coords,

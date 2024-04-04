@@ -298,6 +298,39 @@ def _find_alternative_name(resname, atomname):
         return "O"
 
 
+# =============================================================================
+# Electrostatic quantities
+# =============================================================================
+
+
+def electric_field(
+    target_coords: np.ndarray, source_coords: np.ndarray, source_charges: np.ndarray
+) -> np.ndarray:
+    """
+    Computes the electric fields at points `target_coords`
+    produced by a point charge distribution of point charges
+    `source_charges` localized at `source_coords`.
+    Arguments
+    ---------
+    target_coords  : ndarray, (num_targets, 3)
+                   Target coordinates
+    source_coords  : ndarray, (num_sources, 3)
+                   Source coordinates
+    source_charges : ndarray, (num_sources,)
+                   Source charges
+    Returns
+    -------
+    E              : ndarray, (num_targets, 3)
+                   Electric field at the target coordinates
+    """
+    dist = target_coords[:, None, :] - source_coords[None, :, :]
+    dist2 = np.sum(dist**2, axis=2)
+    dist3 = dist2 * dist2**0.5
+    ddist3 = dist / dist3[:, :, None]
+    E = np.sum(ddist3 * source_charges[None, :, None], axis=1)
+    return E
+
+
 # def findaltnames(longresname, resname, aname):
 #   # This is empirical!
 #   alt = []
