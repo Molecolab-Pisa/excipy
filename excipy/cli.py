@@ -23,9 +23,9 @@ from excipy.database import (
     set_database_folder,
     get_site_model_params,
 )
+from excipy.elec import compute_coulomb_couplings
 from excipy.util import (
     EV2CM,
-    compute_coulomb_couplings,
     create_hdf5_outfile,
     save_n_frames,
     save_residue_ids,

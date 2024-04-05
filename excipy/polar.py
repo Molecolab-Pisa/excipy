@@ -13,7 +13,7 @@ from .util import (
     pbar,
 )
 from .elec import compute_polarizabilities, WANGAL_FACTOR, electric_field
-from .selection import _spherical_cutoff
+from .selection import spherical_cutoff
 
 
 # =============================================================================
@@ -246,7 +246,7 @@ def mmpol_coupling(
     """
     # Get the `cut_mask`, or polarization mask, that selects the polarizable
     # atoms within the given cutoff
-    num_pol, pol_coords, pol_idx = _spherical_cutoff(
+    num_pol, pol_coords, pol_idx = spherical_cutoff(
         source_coords=np.concatenate((coords1, coords2), axis=0),
         ext_coords=coords[env_mask],
         cutoff=pol_threshold,
@@ -322,7 +322,7 @@ def mmpol_site_contribution(
     """
     # Get the `cut_mask`, or polarization mask, that selects the polarizable
     # atoms within the given cutoff
-    num_pol, pol_coords, pol_idx = _spherical_cutoff(
+    num_pol, pol_coords, pol_idx = spherical_cutoff(
         source_coords=coords1,
         ext_coords=coords[env_mask],
         cutoff=pol_threshold,

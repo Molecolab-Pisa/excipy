@@ -3,8 +3,10 @@ from collections import defaultdict
 from collections.abc import Iterable
 import numpy as np
 import scipy.linalg as scipy_la
+
 from .database import type_in_database, get_params, DatabaseError
-from .util import pbar, squared_distances
+from .util import pbar
+from .selection import squared_distances
 
 # ===================================================================
 # Some functions to compute kernels

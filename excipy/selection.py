@@ -1,14 +1,153 @@
 from __future__ import annotations
-from typing import Tuple
+from typing import Tuple, List, Optional
 
 import pytraj as pt
 import numpy as np
 from scipy.spatial.distance import cdist
 
 from .clib.retain_full_residues import retain_full_residues_cy
+from .util import pbar
 
 
 PytrajTopology = pt.Topology
+
+
+# ============================================================
+# Functions to select sets of collections of atoms
+# ============================================================
+
+
+def squared_distances(x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
+    """squared euclidean distances
+
+    This is a memory-efficient (and fast) implementation of the
+    calculation of squared euclidean distances. Euclidean distances
+    between `x1` of shape (n_samples1, n_feats) and `x2` of shape
+    (n_samples2, n_feats) is evaluated by using the "euclidean distances
+    trick":
+
+        dist = X1 @ X1.T - 2 X1 @ X2.T + X2 @ X2.T
+
+    Note: this function evaluates distances between batches of points
+
+    Args:
+        x1: first set of points, (n_samples1, n_feats)
+        x2: second set of points, (n_samples2, n_feats)
+    Returns:
+        dist: squared distances between x1 and x2
+    """
+    jitter = 1e-12
+    x1s = np.sum(np.square(x1), axis=-1)
+    x2s = np.sum(np.square(x2), axis=-1)
+    dist = x1s[:, np.newaxis] - 2 * np.dot(x1, x2.T) + x2s + jitter
+    return dist
+
+
+def euclidean_distances(x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
+    """euclidean distances
+
+    Memory efficient and fast implementation of the calculation
+    of squared euclidean distances.
+    """
+    return np.maximum(squared_distances(x1=x1, x2=x2), 1e-300) ** 0.5
+
+
+def distance_geometric_centers(coords1: np.ndarray, coords2: np.ndarray) -> np.ndarray:
+    """distance between geometric centers
+
+    Computes the distance between the geometric centers of two sets of
+    coordinates.
+
+    Args:
+        coords1: coordinates of the first set, (num_frames, num_atoms1, 3)
+        coords2: coordinates of the second set, (num_frames, num_atoms2, 3)
+    Returns:
+        dist: distance between geometric centers, (num_frames,)
+    """
+    centers1 = np.mean(coords1, axis=1)
+    centers2 = np.mean(coords2, axis=1)
+    dist = np.sum((centers1 - centers2) ** 2, axis=-1) ** 0.5
+    return dist
+
+
+def compute_retain_list(
+    coords: List[np.ndarray],
+    residue_ids: List[str],
+    pairs: List[List[int]],
+    cutoff: float,
+    verbose: Optional[bool] = False,
+):
+    """
+    Compute a list of pairs that have to be retained (True)
+    of excluded (False) on the basis of a distance cutoff
+    between the geometric centers of two molecules
+
+    Args:
+        coords: list of atomic corodinates, each (num_frames, num_atoms, 3)
+        residue_ids: lsit of names of the residues (used for printing only)
+        pairs: list of indices of residues composing each pair, e.g.
+               [[0, 1], [2, 3] specifies pairs 0-1 and 2-3.
+        cutoff: pairs within the cutoff are included, others are excluded.
+    Returns:
+        retain_list: contains True if the pair is within the cutoff,
+                     False otherwise.
+    """
+    retain_list = []
+
+    if verbose:
+        iterator = pbar(
+            pairs,
+            desc=": Evaluating distances",
+            ncols=79,
+        )
+    else:
+        iterator = pairs
+
+    for pair in iterator:
+        if verbose:
+            iterator.set_postfix(pair=f"{residue_ids[pair[0]]}.{residue_ids[pair[1]]}")
+        coords1 = coords[pair[0]]
+        coords2 = coords[pair[1]]
+        dist = distance_geometric_centers(coords1, coords2)
+        # Decide on the basis of the mean distance
+        # if the pair has to be retained or not
+        criterion = np.min(dist)
+        if criterion < cutoff:
+            retain = True
+        else:
+            retain = False
+        retain_list.append(retain)
+    return retain_list
+
+
+def apply_distance_cutoff(
+    coords: List[np.ndarray],
+    residue_ids: List[str],
+    pairs: List[List[int]],
+    cutoff: float,
+    verbose: Optional[bool] = True,
+):
+    """applies a cutoff to select pairs of molecule
+
+    Applies a cutoff that selects which pairs of coordinates should
+    be retained given a list of pairs. The cutoff is applied on
+    the geometric centers of the two pairs.
+
+    Args:
+        coords: list of atomic corodinates, each (num_frames, num_atoms, 3)
+        residue_ids: lsit of names of the residues (used for printing only)
+        pairs: list of indices of residues composing each pair, e.g.
+               [[0, 1], [2, 3] specifies pairs 0-1 and 2-3.
+        cutoff: pairs within the cutoff are included, others are excluded.
+    Returns:
+        pairs: list with the indices of the retained pairs, e.g.
+               [[0, 1]] if only residues 0-1 are within the cutoff.
+    """
+    retain_list = compute_retain_list(
+        coords, residue_ids, pairs, cutoff, verbose=verbose
+    )
+    pairs = [p for p, retain in zip(pairs, retain_list) if retain is True]
+    return pairs
 
 
 # ============================================================
@@ -16,7 +155,7 @@ PytrajTopology = pt.Topology
 # ============================================================
 
 
-def _get_residues_array(topology: PytrajTopology, mm_indices: np.ndarray) -> np.ndarray:
+def get_residues_array(topology: PytrajTopology, mm_indices: np.ndarray) -> np.ndarray:
     """compute the residues_array
 
     Computes an array storing the indices of the first atom of each residue.
@@ -37,7 +176,7 @@ def _get_residues_array(topology: PytrajTopology, mm_indices: np.ndarray) -> np.
     return residues_array
 
 
-def _cutoff_with_whole_residues(
+def cutoff_with_whole_residues(
     ext_topology: PytrajTopology,
     source_coords: np.ndarray,
     ext_coords: np.ndarray,
@@ -55,7 +194,7 @@ def _cutoff_with_whole_residues(
         cutoff: cutoff for the external part
     """
     ext_idx = np.arange(ext_topology.n_atoms)
-    residues_array = _get_residues_array(ext_topology, ext_idx)
+    residues_array = get_residues_array(ext_topology, ext_idx)
     # Compute the distances between each atom of the pigment
     # pair and every other atom of the environment
     # dist is of shape (num_env_atoms, num_pair_atoms)
@@ -82,7 +221,7 @@ def _cutoff_with_whole_residues(
     return num_ext, ext_coords, ext_top, ext_idx
 
 
-def _spherical_cutoff(
+def spherical_cutoff(
     source_coords: np.ndarray, ext_coords: np.ndarray, cutoff: float
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """applies a spherical cutoff around each source atom
@@ -139,7 +278,7 @@ def _whole_residues_mm_cutoff(
     qm_coords = coords[qm_idx]
     mm_coords = coords[mm_idx]
 
-    num_mm, mm_coords, mm_top, mm_sel = _cutoff_with_whole_residues(
+    num_mm, mm_coords, mm_top, mm_sel = cutoff_with_whole_residues(
         ext_topology=mm_top,
         source_coords=qm_coords,
         ext_coords=mm_coords,
@@ -180,7 +319,7 @@ def _whole_residues_pol_cutoff(
     # *in the mm topology*, not the indeces of the pol atoms in
     # the full topology (i.e., if the first atom of the mm topology
     # is the 10th atom, and is polarizable, then it has pol_idx 0)
-    num_pol, pol_coords, pol_top, pol_idx = _cutoff_with_whole_residues(
+    num_pol, pol_coords, pol_top, pol_idx = cutoff_with_whole_residues(
         ext_topology=mm_topology,
         source_coords=qm_coords,
         ext_coords=mm_coords,

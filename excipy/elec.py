@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import warnings
+
+import itertools
 
 import numpy as np
 import pytraj as pt
 
-from .util import atomnum2atomsym, ANG2BOHR
-
+from .util import atomnum2atomsym, ANG2BOHR, pbar, HARTREESQ_NM2CM_1
+from .selection import apply_distance_cutoff
 
 # =============================================================================
 # Polarization models
@@ -380,3 +382,153 @@ def coupling_qq(
     coup = np.sum((coords1[:, None, :] - coords2[None, :, :]) ** 2, axis=-1) ** 0.5
     coup = np.sum(charges1[:, None] * charges2 / coup)
     return coup
+
+
+# =============================================================================
+# Coulomb coupling functions (higher level)
+# =============================================================================
+
+
+def _coulomb_coupling(coord_pairs: List[np.ndarray], charge_pairs: List[np.ndarray]):
+    """
+    Compute the Coulomb coupling between two
+    distributions of point charges.
+    Arguments
+    ---------
+    coord_pairs  : list of two ndarray, (num_samples, num_atoms, 3)
+                 cartesian coordinates.
+    charge_pairs : list of two ndarray, (num_samples, num_atoms)
+                 point charges.
+    Returns
+    -------
+    V            : ndarray, (num_frames,)
+                 Coulomb coupling.
+    """
+    n_atoms1 = charge_pairs[0].shape[1]
+    n_atoms2 = charge_pairs[1].shape[1]
+    pairs = [
+        (p[0], p[1] + n_atoms1)
+        for p in itertools.product(range(n_atoms1), range(n_atoms2))
+    ]
+    xyz_full = np.concatenate(coord_pairs, axis=1)
+    charge_full = np.concatenate(charge_pairs, axis=1)
+    rinv = np.diff(xyz_full[:, pairs, :], axis=2)[:, :, 0] ** 2
+    rinv = pow(rinv.sum(axis=2), -0.5)
+    qq = charge_full[:, pairs].prod(axis=2)
+    V = np.sum(qq * rinv, axis=1)
+    return V
+
+
+def coulomb_coupling(
+    coords: List[np.ndarray],
+    charges: List[np.ndarray],
+    residue_ids: List[str],
+    molecule_pairs: List[List[int]],
+):
+    """
+    Compute the Coulomb coupling between molecule pairs for a density
+    projected onto point charges.
+    Arguments
+    ---------
+    coords         : list of ndarray, (num_samples, num_atoms, 3)
+                   Atomic coordinates.
+    charges        : list of ndarray, (num_samples, num_atoms,)
+                   Point charges.
+    residue_ids    : list of str
+                   Indices/names of the molecules.
+
+    molecule_pairs : list of of lists
+                   Each sublist contains the indeces of the residues forming the pair.
+                   e.g., [[0, 1], [2, 3]] for pairs 0-1 and 2-3.
+                   The list only contains the pairs on which the couplings are effectively
+                   computed (either the list of pairs provided by the user or the one
+                   obtained after applying the cutoff).
+
+    Returns
+    -------
+    couplings      : list of ndarray, (num_samples,)
+                   Coulomb couplings.
+    residue_ids    : list of lists
+                   Each sublist contains the residue_ids for which the coupling has been computed.
+    """
+
+    if len(molecule_pairs) < 1:
+        # No coupling to be computed
+        return (None, None)
+    # List of pairs of coordinates, each of shape (num_samples, num_atoms, 3)
+    coord_pairs = [(coords[pair[0]], coords[pair[1]]) for pair in molecule_pairs]
+    # List of pairs of charges, each of shape (num_samples, num_atoms)
+    charge_pairs = [(charges[pair[0]], charges[pair[1]]) for pair in molecule_pairs]
+    couplings = []
+    iterator = pbar(
+        zip(coord_pairs, charge_pairs, molecule_pairs),
+        total=len(coord_pairs),
+        desc=": Computing couplings",
+        ncols=79,
+    )
+    for coords, charges, pair in iterator:
+        iterator.set_postfix(pair=f"{residue_ids[pair[0]]}.{residue_ids[pair[1]]}")
+        coup = _coulomb_coupling(coord_pairs=coords, charge_pairs=charges)
+        # Append and convert to cm^{-1}
+        couplings.append(coup * HARTREESQ_NM2CM_1 * 10.0)
+    # We also have to tell back what are the residues for which we have
+    # computed the coupling, since we apply a threshold
+    residue_ids = [
+        (residue_ids[pair[0]], residue_ids[pair[1]]) for pair in molecule_pairs
+    ]
+    return couplings, residue_ids
+
+
+def compute_coulomb_couplings(
+    coords: List[np.ndarray],
+    charges: List[np.ndarray],
+    residue_ids: List[str],
+    cutoff: float,
+    coupling_list: List[str],
+):
+    """
+    Compute the Coulomb interaction between all
+    unique pairs of molecules.
+    Arguments
+    ---------
+    coords        : list of ndarray, (num_samples, num_atoms, 3)
+                  Atomic coordinates.
+    charges       : list of ndarray, (num_samples, num_atoms,)
+                  Point charges.
+    residue_ids   : list of str
+                  Indices/names of the molecules.
+    cutoff        : float
+                  Cutoff value. The coupling is computed for pairs within the cutoff.
+    coupling_list : list of str
+                  list of pairs of residues ids, e.g. ["664_665", "667_670", ...]
+    Return
+    ------
+    couplings      : list of ndarray, (num_frames,)
+                   Coulomb couplings.
+    residue_ids    : list of tuples, (2,)
+                   list of tuples, each storing the residue IDs of the
+                   two molecule for which the coupling is computed.
+    """
+
+    if coupling_list is None:
+        num_molecules = len(coords)
+        pairs = [
+            (i, j)
+            for i in range(num_molecules - 1)
+            for j in range(i + 1, num_molecules)
+        ]
+
+        molecule_pairs = apply_distance_cutoff(coords, residue_ids, pairs, cutoff)
+
+    else:
+        pairs = []
+
+        for c in coupling_list:
+            res1, res2 = c.split("_")
+            pair_idx = (residue_ids.index(res1), residue_ids.index(res2))
+            pairs.append(pair_idx)
+
+        # Do not use cutoff if list is provided
+        molecule_pairs = pairs.copy()
+
+    return coulomb_coupling(coords, charges, residue_ids, molecule_pairs)
