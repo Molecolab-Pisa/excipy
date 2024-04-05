@@ -200,9 +200,8 @@ def cut_box(coords1: np.ndarray, coords2: np.ndarray, cutoff: float) -> np.ndarr
     m2z = np.where(coords2[:, 2] > np.max(coords1[:, 2] + cutoff), 0, 1)
     # True if an atom is within the box, False otherwise. We consider residues as a whole
     idx0 = np.min(np.row_stack([m1x, m2x, m1y, m2y, m1z, m2z]), axis=0).astype(bool)
-    # Need to run a "same_residue_as" here.
-    # UPDATE: we don't run it here and we computed the distances 2 times (less expensive), one for the selection, and one for the actual calculation
-    # idx0 = retain_full_residues(idx0, residues_array).astype(bool)
+    # Here we do not run a same_residue_as, so this cuts also the residues
+    # we must then recover them later
     return idx0
 
 
@@ -225,6 +224,7 @@ def whole_residues_cutoff(
     """
     ext_idx = np.arange(ext_coords.shape[0])
     cut_mask = cut_box(source_coords, ext_coords, cutoff)
+    orig_mask = cut_mask.copy()
     # Compute the distances between each atom of the pigment
     # pair and every other atom of the environment
     # dist is of shape (num_env_atoms, num_pair_atoms)
@@ -238,11 +238,20 @@ def whole_residues_cutoff(
     ext_mask = retain_full_residues_cy(
         cut_mask.astype(np.intc), residues_array.astype(np.intc)
     ).astype(bool)
+    # reuse the already-computed distances and just fill with the
+    # missing values
+    dd = np.zeros((sum(ext_mask), source_coords.shape[0]))
+    dd[cut_mask[ext_mask]] = dist[cut_mask[orig_mask]]
+    diff_mask = np.where(ext_mask.astype(int) + cut_mask.astype(int) == 1, True, False)
+    dist = cdist(ext_coords[diff_mask], source_coords)
+    dd[~cut_mask[ext_mask]] = dist
+    # print(np.all(dd - cdist(ext_coords[ext_mask], source_coords) < 1e-10))
+    # cut coordinates
     ext_coords = ext_coords[ext_mask]
     num_ext = ext_coords.shape[0]
     # original indices of the selected mm atoms in the full mm topology
     ext_idx = ext_idx[ext_mask]
-    return num_ext, ext_coords, ext_idx
+    return num_ext, ext_coords, ext_idx, dd
 
 
 def cut_topology(top: pt.Topology, idx: np.ndarray):
@@ -311,7 +320,7 @@ def _whole_residues_mm_cutoff(
     residues_array = get_residues_array(
         topology=mm_top, mm_indices=np.arange(mm_coords.shape[0])
     )
-    num_mm, mm_coords, mm_sel = whole_residues_cutoff(
+    num_mm, mm_coords, mm_sel, _ = whole_residues_cutoff(
         source_coords=qm_coords,
         ext_coords=mm_coords,
         residues_array=residues_array,
@@ -356,7 +365,7 @@ def _whole_residues_pol_cutoff(
     residues_array = get_residues_array(
         topology=mm_topology, mm_indices=np.arange(mm_coords.shape[0])
     )
-    num_pol, pol_coords, pol_idx = whole_residues_cutoff(
+    num_pol, pol_coords, pol_idx, _ = whole_residues_cutoff(
         source_coords=qm_coords,
         ext_coords=mm_coords,
         residues_array=residues_array,

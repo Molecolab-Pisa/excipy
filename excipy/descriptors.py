@@ -659,14 +659,14 @@ class MMElectrostaticPotential(object):
         charges2,
         residues_array,
     ):
-        _, coords2, mask = whole_residues_cutoff(
+        _, coords2, mask, dd = whole_residues_cutoff(
             source_coords=coords1,
             ext_coords=coords2,
             residues_array=residues_array,
             cutoff=self.cutoff,
         )
-        dd = np.sum((coords1[:, None] - coords2) ** 2, axis=2) ** 0.5
-        pot = np.sum(charges2[mask] / dd, axis=1)
+        # dd = np.sum((coords1[:, None] - coords2) ** 2, axis=2) ** 0.5
+        pot = np.sum(charges2[mask, None] / dd, axis=0)
         return pot
 
     def calc_elec_potential_along_traj(
