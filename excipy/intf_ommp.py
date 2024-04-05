@@ -26,6 +26,52 @@ def get_residues_array(topology, mm_indices):
     return residues_array
 
 
+def link_atom_smear(top: pt.Topology, qm_idx: np.ndarray, charges: np.ndarray, pol_charges:np.ndarray, alphas: np.ndarray):
+    for idx in qm_idx:
+
+        is_link_atom = False
+        charge = 0.0
+        pol_charge = 0.0
+        n = 0
+
+        qm_atom = top.atom(idx)
+        neighbors_12 = qm_atom.bonded_indices()
+        for neigh in neighbors_12:
+            is_qm = neigh in qm_idx
+            is_hydrogen = top.atom(neigh).atomic_number == 1
+            if not is_qm and not is_hydrogen:
+                is_link_atom = True
+                n += 1
+            elif not is_qm:
+                is_link_atom = True
+                # accumulate
+                charge += charges[neigh]
+                pol_charge += pol_charges[neigh]
+                charges[neigh] = 0.0
+                pol_charges[neigh] = 0.0
+                alphas[neigh] = 0.0
+
+        if is_link_atom:
+            charge += charges[idx]
+            pol_charge += pol_charges[idx]
+            charges[idx] = 0.0
+            pol_charges[idx] = 0.0
+            alphas[idx] = 0.0
+            if n > 0:
+                charge /= n
+                pol_charge /= n
+            for neigh in neighbors_12:
+                is_qm = neigh in qm_idx
+                is_hydrogen = top.atom(neigh).atomic_number == 1
+                if not is_qm and not is_hydrogen:
+                    charges[neigh] += charge
+                    pol_charges[neigh] += pol_charge
+
+    return charges, pol_charges, alphas
+
+
+
+
 def cutoff_with_whole_residues(
     mm_topology: Any, qm_coords: np.ndarray, mm_coords: np.ndarray, cutoff: float
 ):
@@ -276,6 +322,7 @@ class OMMPInterface:
         top: Any,
         qm_mask: str,
         mmp_fname: str,
+        qm_charges: np.ndarray = None,
         db: str = None,
         mol2: str = None,
         ommp_set_verbose: int = 1,
@@ -295,6 +342,7 @@ class OMMPInterface:
         self.top = top
         self.qm_mask = qm_mask
         self.mmp_fname = mmp_fname
+        self.qm_charges = qm_charges
         self.db = db
         self.mol2 = mol2
         self.ommp_set_verbose = ommp_set_verbose
@@ -386,6 +434,10 @@ class OMMPInterface:
                      shape (n_qm,)
             system: OMMPSystem object with the approximate induced dipoles
         """
+        static_charges = self.charges.copy()
+        pol_charges = self.pol_charges.copy()
+        alphas = self.alphas.copy()
+
         num_mm, qm_coords, mm_coords, mm_top, mm_idx = self._mm_cutoff(coords=coords)
         num_pol, pol_coords, pol_top, pol_idx = self._pol_cutoff(
             qm_coords=qm_coords, mm_coords=mm_coords, mm_top=mm_top
@@ -400,13 +452,21 @@ class OMMPInterface:
         # retain the qm part and all the mm part
         retain_idx = env_idx[mm_idx]
 
+        # put the qm charges in the static charges if you have them
+        if self.qm_charges is not None:
+            static_charges[qm_idx] = self.qm_charges
+
+        charge_qm = static_charges[qm_idx]
+
+        # smear the charges for the eventual presence of link atoms
+        charges, pol_charges, alphas = link_atom_smear(top=self.top, qm_idx=qm_idx, charges=static_charges, pol_charges=pol_charges, alphas=alphas)
+
         # static charges
-        static_charges = self.charges.copy()
-        static_charges[pol_idx] = self.pol_charges[pol_idx].copy()
+        static_charges[pol_idx] = pol_charges[pol_idx].copy()
 
         # polarizabilities
         alpha = np.zeros(self.top.n_atoms, dtype=np.float64)
-        alpha[pol_idx] = self.alphas[pol_idx].copy()
+        alpha[pol_idx] = alphas[pol_idx].copy()
 
         # restrict the selection
         atomic_numbers, resids, coordinates, static_charges, alpha = _filter_indices(
@@ -443,7 +503,7 @@ class OMMPInterface:
 
         # the qm part is treated as mm (collection of point charges)
         # we compute the external field as the field of that collection of charges
-        qm_helper = ommp.OMMPQmHelper(coord_qm=qm_coords*ANG2BOHR, charge_qm=self.charges[qm_idx], z_qm=self.atomic_numbers[qm_idx])
+        qm_helper = ommp.OMMPQmHelper(coord_qm=qm_coords*ANG2BOHR, charge_qm=charge_qm, z_qm=self.atomic_numbers[qm_idx])
         qm_helper.prepare_qm_ele_ene(system)
         system.set_external_field(qm_helper.E_n2p)
 
