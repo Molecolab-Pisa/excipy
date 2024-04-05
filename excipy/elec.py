@@ -144,6 +144,11 @@ def compute_polarizabilities(
     return polarizabilities
 
 
+# =============================================================================
+# Utilities to read electrostatic parameters from a topology / database
+# =============================================================================
+
+
 def read_electrostatics(
     top: pt.Topology, db: str = None, mol2: str = None, warn: bool = True
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -298,6 +303,31 @@ def _find_alternative_name(resname, atomname):
         return "O"
 
 
+# def findaltnames(longresname, resname, aname):
+#   # This is empirical!
+#   alt = []
+#   blk = False # Whether to remove "aname" from the DB
+#   if resname in amino+nter_amino+['NME']:
+#     if aname == 'HN': alt += ['H']
+#   if resname == 'ILE' and aname == 'HD':
+#      alt += ['HD1']
+#   if resname == 'ARG' and aname == 'HH':
+#      alt += ['HH1','HH2']
+#   if resname in cter_amino:
+#     if aname == 'OXT': alt += ['O']
+#   if resname in ('ACE','NME') and aname == 'H':
+#     alt += ['HH31','HH32','HH33']
+#     blk  = True
+#   if resname in ('Cl-', 'CL') and aname == 'CL':
+#     alt += ['Cl-', 'CL-']
+#   if resname in ('Na+', 'NA') and aname == 'NA':
+#     alt += ['Na+', 'NA+']
+#
+#   # Paranoid check
+#   if len(alt) == 0 and blk:
+#     c.error('Could not find a valid atom name for %s %s' % (resname,aname) )
+#   return alt,blk
+
 # =============================================================================
 # Electrostatic quantities
 # =============================================================================
@@ -331,27 +361,22 @@ def electric_field(
     return E
 
 
-# def findaltnames(longresname, resname, aname):
-#   # This is empirical!
-#   alt = []
-#   blk = False # Whether to remove "aname" from the DB
-#   if resname in amino+nter_amino+['NME']:
-#     if aname == 'HN': alt += ['H']
-#   if resname == 'ILE' and aname == 'HD':
-#      alt += ['HD1']
-#   if resname == 'ARG' and aname == 'HH':
-#      alt += ['HH1','HH2']
-#   if resname in cter_amino:
-#     if aname == 'OXT': alt += ['O']
-#   if resname in ('ACE','NME') and aname == 'H':
-#     alt += ['HH31','HH32','HH33']
-#     blk  = True
-#   if resname in ('Cl-', 'CL') and aname == 'CL':
-#     alt += ['Cl-', 'CL-']
-#   if resname in ('Na+', 'NA') and aname == 'NA':
-#     alt += ['Na+', 'NA+']
-#
-#   # Paranoid check
-#   if len(alt) == 0 and blk:
-#     c.error('Could not find a valid atom name for %s %s' % (resname,aname) )
-#   return alt,blk
+# not used in cli, here as it's handy
+def coupling_qq(
+    coords1: np.ndarray, charges1: np.ndarray, coords2: np.ndarray, charges2: np.ndarray
+):
+    """
+    Computes the interaction energy between two distributions of point
+    charges.
+
+    Args:
+        coords1: coordinates of the first set, (n_atoms1, 3)
+        charges1: charges of the first set, (n_atoms1,)
+        coords2: coordinates of the second set, (n_atoms2, 3)
+        charges2: charges of the second set, (n_atoms2,)
+    Returns:
+        coup: the interaction energy
+    """
+    coup = np.sum((coords1[:, None, :] - coords2[None, :, :]) ** 2, axis=-1) ** 0.5
+    coup = np.sum(charges1[:, None] * charges2 / coup)
+    return coup
