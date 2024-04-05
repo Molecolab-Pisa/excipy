@@ -147,6 +147,61 @@ def compute_polarizabilities(
 
 
 # =============================================================================
+# link atom
+# =============================================================================
+
+
+def link_atom_smear(
+    top: pt.Topology,
+    qm_idx: np.ndarray,
+    charges: np.ndarray,
+    pol_charges: np.ndarray,
+    alphas: np.ndarray,
+):
+    for idx in qm_idx:
+
+        is_link_atom = False
+        charge = 0.0
+        pol_charge = 0.0
+        n = 0
+
+        qm_atom = top.atom(idx)
+        neighbors_12 = qm_atom.bonded_indices()
+        for neigh in neighbors_12:
+            is_qm = neigh in qm_idx
+            is_hydrogen = top.atom(neigh).atomic_number == 1
+            if not is_qm and not is_hydrogen:
+                is_link_atom = True
+                n += 1
+            elif not is_qm:
+                is_link_atom = True
+                # accumulate
+                charge += charges[neigh]
+                pol_charge += pol_charges[neigh]
+                charges[neigh] = 0.0
+                pol_charges[neigh] = 0.0
+                alphas[neigh] = 0.0
+
+        if is_link_atom:
+            charge += charges[idx]
+            pol_charge += pol_charges[idx]
+            charges[idx] = 0.0
+            pol_charges[idx] = 0.0
+            alphas[idx] = 0.0
+            if n > 0:
+                charge /= n
+                pol_charge /= n
+            for neigh in neighbors_12:
+                is_qm = neigh in qm_idx
+                is_hydrogen = top.atom(neigh).atomic_number == 1
+                if not is_qm and not is_hydrogen:
+                    charges[neigh] += charge
+                    pol_charges[neigh] += pol_charge
+
+    return charges, pol_charges, alphas
+
+
+# =============================================================================
 # Utilities to read electrostatic parameters from a topology / database
 # =============================================================================
 

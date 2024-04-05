@@ -9,7 +9,7 @@ import pyopenmmpol as ommp
 
 from .util import build_connectivity_matrix, ANG2BOHR
 from .selection import _whole_residues_mm_cutoff, _whole_residues_pol_cutoff
-from .elec import read_electrostatics
+from .elec import read_electrostatics, link_atom_smear
 
 
 def _filter_indices(*arrays, indices):
@@ -172,7 +172,6 @@ class OMMPInterface:
         pol_charges = self.pol_charges.copy()
         alphas = self.alphas.copy()
 
-
         qm_coords, mm_coords, qm_idx, mm_idx, mm_top = _whole_residues_mm_cutoff(
             topology=self.top, coords=coords, qm_mask=self.qm_mask, mm_cut=self.mm_cut
         )
@@ -193,7 +192,13 @@ class OMMPInterface:
         charge_qm = static_charges[qm_idx]
 
         # smear the charges for the eventual presence of link atoms
-        charges, pol_charges, alphas = link_atom_smear(top=self.top, qm_idx=qm_idx, charges=static_charges, pol_charges=pol_charges, alphas=alphas)
+        charges, pol_charges, alphas = link_atom_smear(
+            top=self.top,
+            qm_idx=qm_idx,
+            charges=static_charges,
+            pol_charges=pol_charges,
+            alphas=alphas,
+        )
 
         # static charges
         static_charges[pol_idx] = pol_charges[pol_idx].copy()
@@ -237,7 +242,11 @@ class OMMPInterface:
 
         # the qm part is treated as mm (collection of point charges)
         # we compute the external field as the field of that collection of charges
-        qm_helper = ommp.OMMPQmHelper(coord_qm=qm_coords*ANG2BOHR, charge_qm=charge_qm, z_qm=self.atomic_numbers[qm_idx])
+        qm_helper = ommp.OMMPQmHelper(
+            coord_qm=qm_coords * ANG2BOHR,
+            charge_qm=charge_qm,
+            z_qm=self.atomic_numbers[qm_idx],
+        )
         qm_helper.prepare_qm_ele_ene(system)
         system.set_external_field(qm_helper.E_n2p)
 

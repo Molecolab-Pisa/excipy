@@ -12,7 +12,11 @@ from .util import (
     _pad_list_of_lists,
     pbar,
 )
-from .elec import compute_polarizabilities, WANGAL_FACTOR, electric_field
+from .elec import (
+    compute_polarizabilities,
+    WANGAL_FACTOR,
+    electric_field,
+)
 from .selection import spherical_cutoff
 
 
