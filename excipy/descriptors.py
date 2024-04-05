@@ -1,9 +1,9 @@
-import warnings
 import numpy as np
 import pytraj as pt
 from collections.abc import Iterable
 from .util import ANG2BOHR, pbar
-from .clib.retain_full_residues import retain_full_residues_cy
+from .elec import read_electrostatics
+from .selection import get_residues_array, whole_residues_cutoff
 
 
 # =============================================================================
@@ -652,77 +652,6 @@ class MMElectrostaticPotential(object):
         self.charges_db = charges_db
         self.remove_mean = remove_mean
 
-    @property
-    def charges_db(self):
-        return self._charges_db
-
-    @charges_db.setter
-    def charges_db(self, val):
-        self._charges_db = val
-        if self._charges_db is None:
-            pass
-        else:
-            db_residues = np.loadtxt(self.charges_db, usecols=0, dtype=str)
-            db_atnames = np.loadtxt(self.charges_db, usecols=1, dtype=str)
-            db_charges = np.loadtxt(self.charges_db, usecols=2, dtype=float)
-            # Array of 'RESIDUE_NAME ATOM_NAME' elements
-            self.db = np.array(
-                [
-                    (res + " " + name, q)
-                    for res, name, q in zip(db_residues, db_atnames, db_charges)
-                ]
-            )
-
-    def get_residues_array(self, mm_indices):
-        num_mm = np.array([len(mm_indices)])
-        _, indices = np.unique(
-            np.array([self.top.atom(i).resid for i in mm_indices]), return_index=True
-        )
-        # This array is passed to C code: ensure it is an array of C integers
-        residues_array = np.concatenate([indices, num_mm]).astype(np.intc)
-        return residues_array
-
-    def retain_full_residues(self, idx, residues_array):
-        """
-        Given an array `idx`, with 1 standing for `selected atom`
-        and 0 standing for `unselected atom`, and an array `residues_array`
-        with entries corresponding to the beginning of a residue in `idx`,
-        yields a new array `new_idx` with entries 1 for all atoms of each residue
-        for which at least on atom is selected in the original `idx` array.
-
-        Example:
-            >>> idx = np.array([1, 0, 0, 0, 0, 0])
-            >>> residues_array = np.array([0, 2])
-            >>> new_idx = retain_full_residues(idx, residues_array)
-            >>> print(new_idx)
-                [1, 1, 0, 0, 0, 0]
-        """
-        new_idx = np.zeros(idx.shape)
-        n_resids = residues_array.shape[0]
-        for i in range(0, n_resids - 1):
-            start = residues_array[i]
-            stop = residues_array[i + 1]
-            val = np.sum(idx[start:stop])
-            if val > 0.5:
-                new_idx[start:stop] = 1
-        return new_idx
-
-    def cut_box(self, coords1, coords2, residues_array):
-        # Select atoms in a box with length 2 * self.cutoff
-        m1x = np.where(coords2[:, 0] < np.min(coords1[:, 0] - self.cutoff), 0, 1)
-        m2x = np.where(coords2[:, 0] > np.max(coords1[:, 0] + self.cutoff), 0, 1)
-        m1y = np.where(coords2[:, 1] < np.min(coords1[:, 1] - self.cutoff), 0, 1)
-        m2y = np.where(coords2[:, 1] > np.max(coords1[:, 1] + self.cutoff), 0, 1)
-        m1z = np.where(coords2[:, 2] < np.min(coords1[:, 2] - self.cutoff), 0, 1)
-        m2z = np.where(coords2[:, 2] > np.max(coords1[:, 2] + self.cutoff), 0, 1)
-        # True if an atom is within the box, False otherwise. We consider residues as a whole
-        idx0 = np.min(np.row_stack([m1x, m2x, m1y, m2y, m1z, m2z]), axis=0).astype(
-            np.intc
-        )
-        # Need to run a "same_residue_as" here.
-        idx0 = retain_full_residues_cy(idx0, residues_array).astype(bool)
-        return idx0
-
     def electrostatic_potential(
         self,
         coords1,
@@ -730,24 +659,14 @@ class MMElectrostaticPotential(object):
         charges2,
         residues_array,
     ):
-        # First selection: cut a box with box length 2 * self.cutoff
-        idx0 = self.cut_box(coords1, coords2, residues_array)
-        # mask storing which residues are within the box
-        mask = idx0 == True  # noqa: E712
-        # Compute distances in the small box
-        dd = np.sum((coords1[:, None, :] - coords2[idx0, :]) ** 2, axis=2) ** 0.5
-        # Indices of atoms within cutoff
-        idx_cut = np.max(np.where(dd < self.cutoff, 1, 0), axis=0).astype(bool)
-        # Update idx0: now it has True for residues within the cutoff, False otherwise
-        idx0[mask] = idx_cut
-        # idx is passed to C code: ensure it is an array of C integers
-        idx = idx0.astype(np.intc)
-        # NOTE: np.intc is np.int32 (maxval: 2,147,483,648), which should be enough
-        # (is max num atoms)
-        # We use the Cython version here (much faster)
-        # No much gain as system size increases though (bottleneck is `dd`)
-        idx = retain_full_residues_cy(idx, residues_array)
-        pot = np.sum(charges2[mask] * idx[mask] / dd, axis=1)
+        _, coords2, mask = whole_residues_cutoff(
+            source_coords=coords1,
+            ext_coords=coords2,
+            residues_array=residues_array,
+            cutoff=self.cutoff,
+        )
+        dd = np.sum((coords1[:, None] - coords2) ** 2, axis=2) ** 0.5
+        pot = np.sum(charges2[mask] / dd, axis=1)
         return pot
 
     def calc_elec_potential_along_traj(
@@ -786,34 +705,19 @@ class MMElectrostaticPotential(object):
         return potentials
 
     def get_charges(self, indices):
-        if self.charges_db is None:
-            # MM charges taken from topology
-            charges = np.asarray([a.charge for a in self.top.atoms])
-            return charges[indices]
-        else:
-            # MM charges taken from charge database
-            assert hasattr(self, "db")
-            charges = []
-            for atom in self.top.atoms:
-                try:
-                    res = self.top.residue(atom.resid).name
-                    name = atom.name
-                    pattern = res.strip() + " " + name.strip()
-                    idx = np.where(self.db[:, 0] == pattern)[0][0]
-                    charge = float(self.db[idx][1])
-                except IndexError:
-                    charge = atom.charge
-                    msg = f"{self.__class__} charge for {res} {name} not found."
-                    msg += f" Taking from topology (q={charge:.6f})"
-                    warnings.warn(msg)
-                charges.append(charge)
-            return np.array(charges)[indices]
+        charges, _, _ = read_electrostatics(
+            top=self.top,
+            db=self.charges_db,
+            mol2=None,
+            warn=False,
+        )
+        return charges[indices]
 
     def _encode(self):
         qm_indices = self.top.select(self.qm_mask)
         mm_indices = self.top.select(self.mm_mask)
         mm_charges = self.get_charges(mm_indices)
-        residues_array = self.get_residues_array(mm_indices)
+        residues_array = get_residues_array(self.top, mm_indices)
         return self.calc_elec_potential_along_traj(
             qm_indices,
             mm_indices,

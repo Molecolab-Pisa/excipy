@@ -176,10 +176,40 @@ def get_residues_array(topology: PytrajTopology, mm_indices: np.ndarray) -> np.n
     return residues_array
 
 
-def cutoff_with_whole_residues(
-    ext_topology: PytrajTopology,
+def cut_box(coords1: np.ndarray, coords2: np.ndarray, cutoff: float) -> np.ndarray:
+    """cuts a cubic box around the atoms in coords1
+
+    Cuts a cubic box around the atoms in coords1.
+    The box extends a cutoff distance below/above the minimum/maximum
+    position of atoms in coords1 in the three cartesian directions.
+
+    Args:
+        coords1: shape (n_atoms_1, 3)
+        coords2: shape (n_atoms_2, 3)
+        cutoff: cutoff value to cut the box
+    Returns:
+        idx0: True/False if an atom in coords2 is within/outside
+              the cutted box, shape (n_atoms_2,)
+    """
+    # Select atoms in a box with length >= 2 * self.cutoff
+    m1x = np.where(coords2[:, 0] < np.min(coords1[:, 0] - cutoff), 0, 1)
+    m2x = np.where(coords2[:, 0] > np.max(coords1[:, 0] + cutoff), 0, 1)
+    m1y = np.where(coords2[:, 1] < np.min(coords1[:, 1] - cutoff), 0, 1)
+    m2y = np.where(coords2[:, 1] > np.max(coords1[:, 1] + cutoff), 0, 1)
+    m1z = np.where(coords2[:, 2] < np.min(coords1[:, 2] - cutoff), 0, 1)
+    m2z = np.where(coords2[:, 2] > np.max(coords1[:, 2] + cutoff), 0, 1)
+    # True if an atom is within the box, False otherwise. We consider residues as a whole
+    idx0 = np.min(np.row_stack([m1x, m2x, m1y, m2y, m1z, m2z]), axis=0).astype(bool)
+    # Need to run a "same_residue_as" here.
+    # UPDATE: we don't run it here and we computed the distances 2 times (less expensive), one for the selection, and one for the actual calculation
+    # idx0 = retain_full_residues(idx0, residues_array).astype(bool)
+    return idx0
+
+
+def whole_residues_cutoff(
     source_coords: np.ndarray,
     ext_coords: np.ndarray,
+    residues_array: np.ndarray,
     cutoff: float,
 ):
     """applies the cutoff without cutting the residues
@@ -193,32 +223,32 @@ def cutoff_with_whole_residues(
         ext_coords: coordinates of the external part
         cutoff: cutoff for the external part
     """
-    ext_idx = np.arange(ext_topology.n_atoms)
-    residues_array = get_residues_array(ext_topology, ext_idx)
+    ext_idx = np.arange(ext_coords.shape[0])
+    cut_mask = cut_box(source_coords, ext_coords, cutoff)
     # Compute the distances between each atom of the pigment
     # pair and every other atom of the environment
     # dist is of shape (num_env_atoms, num_pair_atoms)
-    dist = cdist(ext_coords, source_coords)
+    dist = cdist(ext_coords[cut_mask], source_coords)
     # For each environment atom, find the minimum distance
     # from the pair coordinates
     # min_dist is of shape (num_env_atoms,)
-    min_dist = np.min(dist, axis=1)
-    # Keep atoms within the cutoff
-    ext_mask = min_dist <= cutoff
-    cut_mask = np.zeros(len(min_dist), dtype=bool)
-    cut_mask[ext_mask] = True
+    idx_cut = np.max(np.where(dist <= cutoff, 1, 0), axis=1).astype(bool)
+    cut_mask[cut_mask] = idx_cut
     # mm mask now has the residues as a whole, within the cutoff
     ext_mask = retain_full_residues_cy(
         cut_mask.astype(np.intc), residues_array.astype(np.intc)
     ).astype(bool)
-    num_ext = sum(ext_mask)
     ext_coords = ext_coords[ext_mask]
+    num_ext = ext_coords.shape[0]
     # original indices of the selected mm atoms in the full mm topology
     ext_idx = ext_idx[ext_mask]
+    return num_ext, ext_coords, ext_idx
+
+
+def cut_topology(top: pt.Topology, idx: np.ndarray):
     # amber mask counts from 1
-    ext_mask = "@" + ",".join((ext_idx + 1).astype(str))
-    ext_top = ext_topology[ext_mask]
-    return num_ext, ext_coords, ext_top, ext_idx
+    mask = "@" + ",".join((idx + 1).astype(str))
+    return top[mask]
 
 
 def spherical_cutoff(
@@ -278,12 +308,16 @@ def _whole_residues_mm_cutoff(
     qm_coords = coords[qm_idx]
     mm_coords = coords[mm_idx]
 
-    num_mm, mm_coords, mm_top, mm_sel = cutoff_with_whole_residues(
-        ext_topology=mm_top,
+    residues_array = get_residues_array(
+        topology=mm_top, mm_indices=np.arange(mm_coords.shape[0])
+    )
+    num_mm, mm_coords, mm_sel = whole_residues_cutoff(
         source_coords=qm_coords,
         ext_coords=mm_coords,
+        residues_array=residues_array,
         cutoff=mm_cut,
     )
+    mm_top = cut_topology(top=mm_top, idx=mm_sel)
 
     # indices in the original topology
     mm_idx = mm_idx[mm_sel]
@@ -319,10 +353,14 @@ def _whole_residues_pol_cutoff(
     # *in the mm topology*, not the indeces of the pol atoms in
     # the full topology (i.e., if the first atom of the mm topology
     # is the 10th atom, and is polarizable, then it has pol_idx 0)
-    num_pol, pol_coords, pol_top, pol_idx = cutoff_with_whole_residues(
-        ext_topology=mm_topology,
+    residues_array = get_residues_array(
+        topology=mm_topology, mm_indices=np.arange(mm_coords.shape[0])
+    )
+    num_pol, pol_coords, pol_idx = whole_residues_cutoff(
         source_coords=qm_coords,
         ext_coords=mm_coords,
+        residues_array=residues_array,
         cutoff=pol_cut,
     )
+    pol_top = cut_topology(top=mm_topology, idx=pol_idx)
     return pol_coords, pol_top, pol_idx
