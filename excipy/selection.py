@@ -240,18 +240,56 @@ def whole_residues_cutoff(
     ).astype(bool)
     # reuse the already-computed distances and just fill with the
     # missing values
-    dd = np.zeros((sum(ext_mask), source_coords.shape[0]))
-    dd[cut_mask[ext_mask]] = dist[cut_mask[orig_mask]]
-    diff_mask = np.where(ext_mask.astype(int) + cut_mask.astype(int) == 1, True, False)
-    dist = cdist(ext_coords[diff_mask], source_coords)
-    dd[~cut_mask[ext_mask]] = dist
-    # print(np.all(dd - cdist(ext_coords[ext_mask], source_coords) < 1e-10))
+    dist = _distances_diffmask(
+        source_coords=source_coords,
+        ext_coords=ext_coords,
+        dist1=dist,
+        cut0_mask=orig_mask,
+        cut1_mask=cut_mask,
+        cut2_mask=ext_mask,
+    )
     # cut coordinates
     ext_coords = ext_coords[ext_mask]
     num_ext = ext_coords.shape[0]
     # original indices of the selected mm atoms in the full mm topology
     ext_idx = ext_idx[ext_mask]
-    return num_ext, ext_coords, ext_idx, dd
+    return num_ext, ext_coords, ext_idx, dist
+
+
+def _distances_diffmask(
+    source_coords: np.ndarray,
+    ext_coords: np.ndarray,
+    dist1: np.ndarray,
+    cut0_mask: np.ndarray,
+    cut1_mask: np.ndarray,
+    cut2_mask: np.ndarray,
+) -> np.ndarray:
+    """
+    Computes the distances only with those external coordinates that are not
+    included in the first cut, but are included in the second cut. The zero
+    cut takes into account additional, preliminary cuts, that are used to
+    compute dist1.
+
+    dist1 has shape (sum(cut0_mask), n_source), where sum(cut0_mask) is the
+    number of external coordinates in the first cut. If there is not preliminary
+    cut, provide cut0 as an array of True with length dist1.shape[0]
+    """
+    # find the final number of external coordinates (number of T in cut2_mask)
+    n_ext = sum(cut2_mask)
+    n_source = source_coords.shape[0]
+    # create a distance matrix to be filled with the first set of distances and the new ones
+    dist = np.zeros((n_ext, n_source))
+    # fill the distance matrix with the precomputed distances of the first cut
+    dist[cut1_mask[cut2_mask]] = dist1[cut1_mask[cut0_mask]]
+    # find the entries that are present in cut2_mask but not in cut1_mask
+    diff_mask = np.where(
+        cut2_mask.astype(int) + cut1_mask.astype(int) == 1, True, False
+    )
+    # new set of distances, renaming dist1 as it's not used anymore
+    dist1 = cdist(ext_coords[diff_mask], source_coords)
+    # fill the empty entries of dist
+    dist[~cut1_mask[cut2_mask]] = dist1
+    return dist
 
 
 def cut_topology(top: pt.Topology, idx: np.ndarray):
