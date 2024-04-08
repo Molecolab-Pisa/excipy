@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List
+from typing import Any
 import os
 import multiprocessing
 from itertools import repeat
@@ -146,12 +146,89 @@ class OMMPInterface:
     def _get_resids(self, top: Any):
         return np.array([atom.resid for atom in top.atoms], copy=True)
 
+    def _copy_elec(self):
+        return self.charges.copy(), self.pol_charges.copy(), self.alphas.copy()
+
+    def _maybe_insert_qm_charges(self, static_charges, qm_idx):
+        if self.qm_charges is not None:
+            static_charges[qm_idx] = self.qm_charges.copy()
+        qm_charges = static_charges[qm_idx]
+        return static_charges, qm_charges
+
+    def _build_connectivity_matrix(self, mm_top):
+        conn = build_connectivity_matrix(mm_top, count_as="python") + 1
+        maxc = conn.shape[1]
+        connectivity = np.zeros((mm_top.n_atoms, 8))
+        connectivity[:, :maxc] = conn
+        return connectivity
+
+    def _maybe_use_postfix(self, mmp_postfix):
+        no_postfix = mmp_postfix is None
+        if no_postfix:
+            mmp_fname = self.mmp_fname
+        else:
+            mmp_fname, ext = os.path.splitext(self.mmp_fname)
+            mmp_fname = mmp_fname + "_{:07d}".format(mmp_postfix) + ext
+        return mmp_fname
+
+    def _apply_cutoff(self, coords):
+        qm_coords, mm_coords, qm_idx, mm_idx, mm_top = _whole_residues_mm_cutoff(
+            topology=self.top,
+            coords=coords,
+            qm_mask=self.qm_mask,
+            mm_cut=self.mm_cut,
+        )
+
+        pol_coords, pol_top, pol_idx = _whole_residues_pol_cutoff(
+            mm_topology=mm_top,
+            qm_coords=qm_coords,
+            mm_coords=mm_coords,
+            pol_cut=self.pol_cut,
+        )
+
+        # pol indices in the original topology
+        pol_idx = mm_idx[pol_idx]
+
+        return (
+            qm_coords,
+            mm_coords,
+            pol_coords,
+            qm_idx,
+            mm_idx,
+            pol_idx,
+            mm_top,
+            pol_top,
+        )
+
+    def _prepare_electrostatics(self, qm_idx, pol_idx):
+        # do not override anything
+        charges, pol_charges, alphas = self._copy_elec()
+        # put the qm charges in the static charges if you have them
+        charges, qm_charges = self._maybe_insert_qm_charges(charges, qm_idx)
+
+        # smear the charges for the eventual presence of link atoms
+        charges, pol_charges, alphas = link_atom_smear(
+            top=self.top,
+            qm_idx=qm_idx,
+            charges=charges,
+            pol_charges=pol_charges,
+            alphas=alphas,
+        )
+
+        # static charges
+        charges[pol_idx] = pol_charges[pol_idx].copy()
+
+        # polarizabilities
+        alpha = np.zeros(self.top.n_atoms, dtype=np.float64)
+        alpha[pol_idx] = alphas[pol_idx].copy()
+
+        return charges, pol_charges, alpha, qm_charges
+
     def potential_approx_ipd(
         self,
         coords: np.ndarray,
         mmp_postfix: int = None,
         return_system: bool = False,
-        pin_cpus: List[int] = None,
     ):
         """potential of approximate induced dipoles on the qm atoms
 
@@ -168,92 +245,68 @@ class OMMPInterface:
                      shape (n_qm,)
             system: OMMPSystem object with the approximate induced dipoles
         """
-        static_charges = self.charges.copy()
-        pol_charges = self.pol_charges.copy()
-        alphas = self.alphas.copy()
-
-        qm_coords, mm_coords, qm_idx, mm_idx, mm_top = _whole_residues_mm_cutoff(
-            topology=self.top, coords=coords, qm_mask=self.qm_mask, mm_cut=self.mm_cut
+        # split into qm, mm, and pol parts
+        (
+            qm_coords,
+            mm_coords,
+            pol_coords,
+            qm_idx,
+            mm_idx,
+            pol_idx,
+            mm_top,
+            pol_top,
+        ) = self._apply_cutoff(coords=coords)
+        # get the correct electrostatic parameters
+        charges, pol_charges, alpha, qm_charges = self._prepare_electrostatics(
+            qm_idx=qm_idx, pol_idx=pol_idx
         )
-
-        pol_coords, pol_top, pol_idx = _whole_residues_pol_cutoff(
-            mm_topology=mm_top,
-            qm_coords=qm_coords,
-            mm_coords=mm_coords,
-            pol_cut=self.pol_cut,
-        )
-        # pol indices in the original topology
-        pol_idx = mm_idx[pol_idx]
-
-        # put the qm charges in the static charges if you have them
-        if self.qm_charges is not None:
-            static_charges[qm_idx] = self.qm_charges
-
-        charge_qm = static_charges[qm_idx]
-
-        # smear the charges for the eventual presence of link atoms
-        charges, pol_charges, alphas = link_atom_smear(
-            top=self.top,
-            qm_idx=qm_idx,
-            charges=static_charges,
-            pol_charges=pol_charges,
-            alphas=alphas,
-        )
-
-        # static charges
-        static_charges[pol_idx] = pol_charges[pol_idx].copy()
-
-        # polarizabilities
-        alpha = np.zeros(self.top.n_atoms, dtype=np.float64)
-        alpha[pol_idx] = alphas[pol_idx].copy()
-
-        # restrict the selection
-        atomic_numbers, resids, coordinates, static_charges, alpha = _filter_indices(
+        # select only the mm part
+        (
+            mm_atomic_numbers,
+            mm_resids,
+            mm_coordinates,
+            mm_charges,
+            mm_alpha,
+        ) = _filter_indices(
             self.atomic_numbers,
             self.resids,
             coords,
-            static_charges,
+            charges,
             alpha,
             indices=mm_idx,
         )
-
-        conn = build_connectivity_matrix(mm_top, count_as="python") + 1
-        maxc = conn.shape[1]
-        connectivity = np.zeros((mm_top.n_atoms, 8))
-        connectivity[:, :maxc] = conn
-
-        if mmp_postfix is None:
-            mmp_fname = self.mmp_fname
-        else:
-            mmp_fname, ext = os.path.splitext(self.mmp_fname)
-            mmp_fname = mmp_fname + "_{:07d}".format(mmp_postfix) + ext
+        connectivity = self._build_connectivity_matrix(mm_top)
+        # maybe use a postfix (e.g., to avoid clashes when multiple
+        # mmp files are used at once)
+        mmp_fname = self._maybe_use_postfix(mmp_postfix)
 
         write_mmp_input(
             fname=mmp_fname,
-            atomic_numbers=atomic_numbers,
-            coordinates=coordinates,
-            resid=resids,
-            static_charges=static_charges,
-            polarizabilities=alpha,
+            atomic_numbers=mm_atomic_numbers,
+            coordinates=mm_coordinates,
+            resid=mm_resids,
+            static_charges=mm_charges,
+            polarizabilities=mm_alpha,
             connectivity=connectivity,
         )
 
         system = ommp.OMMPSystem(mmp_fname)
 
+        # atomic units
+        qm_coords = qm_coords * ANG2BOHR
+
         # the qm part is treated as mm (collection of point charges)
-        # we compute the external field as the field of that collection of charges
+        # the external field is the field of that collection of charges
         qm_helper = ommp.OMMPQmHelper(
-            coord_qm=qm_coords * ANG2BOHR,
-            charge_qm=charge_qm,
+            coord_qm=qm_coords,
+            charge_qm=qm_charges,
             z_qm=self.atomic_numbers[qm_idx],
         )
         qm_helper.prepare_qm_ele_ene(system)
+        # solve for μ induced
         system.set_external_field(qm_helper.E_n2p)
-
-        # keep in atomic units to be consistent with the
-        # electrostatic potential descriptor
-        elecpot = system.potential_pol2ext(qm_coords * ANG2BOHR)  # [e / Bohr]
-
+        # atomic units (consistent with the elecpot descriptor)
+        elecpot = system.potential_pol2ext(qm_coords)  # [e / Bohr]
         # clean after yourself
         os.remove(mmp_fname)
 
