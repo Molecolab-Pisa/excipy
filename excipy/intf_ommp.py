@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Tuple, Optional
+
 import os
 import multiprocessing
 from itertools import repeat
@@ -149,20 +150,22 @@ class OMMPInterface:
     def _copy_elec(self):
         return self.charges.copy(), self.pol_charges.copy(), self.alphas.copy()
 
-    def _maybe_insert_qm_charges(self, static_charges, qm_idx):
+    def _maybe_insert_qm_charges(
+        self, static_charges: np.ndarray, qm_idx: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
         if self.qm_charges is not None:
             static_charges[qm_idx] = self.qm_charges.copy()
         qm_charges = static_charges[qm_idx]
         return static_charges, qm_charges
 
-    def _build_connectivity_matrix(self, mm_top):
+    def _build_connectivity_matrix(self, mm_top: Any) -> np.ndarray:
         conn = build_connectivity_matrix(mm_top, count_as="python") + 1
         maxc = conn.shape[1]
         connectivity = np.zeros((mm_top.n_atoms, 8))
         connectivity[:, :maxc] = conn
         return connectivity
 
-    def _maybe_use_postfix(self, mmp_postfix):
+    def _maybe_use_postfix(self, mmp_postfix: Optional[str]) -> str:
         no_postfix = mmp_postfix is None
         if no_postfix:
             mmp_fname = self.mmp_fname
@@ -171,7 +174,11 @@ class OMMPInterface:
             mmp_fname = mmp_fname + "_{:07d}".format(mmp_postfix) + ext
         return mmp_fname
 
-    def _apply_cutoff(self, coords):
+    def _apply_cutoff(
+        self, coords: np.ndarray
+    ) -> Tuple[
+        np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any, Any
+    ]:
         qm_coords, mm_coords, qm_idx, mm_idx, mm_top = _whole_residues_mm_cutoff(
             topology=self.top,
             coords=coords,
@@ -200,7 +207,9 @@ class OMMPInterface:
             pol_top,
         )
 
-    def _prepare_electrostatics(self, qm_idx, pol_idx):
+    def _prepare_electrostatics(
+        self, qm_idx: np.ndarray, pol_idx: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         # do not override anything
         charges, pol_charges, alphas = self._copy_elec()
         # put the qm charges in the static charges if you have them
@@ -224,12 +233,64 @@ class OMMPInterface:
 
         return charges, pol_charges, alpha, qm_charges
 
+    def prepare_ommp_system(
+        self, coords: np.ndarray, mmp_postfix: Optional[str] = None
+    ) -> Any:
+        # split into qm, mm, and pol parts
+        (
+            qm_coords,
+            mm_coords,
+            pol_coords,
+            qm_idx,
+            mm_idx,
+            pol_idx,
+            mm_top,
+            pol_top,
+        ) = self._apply_cutoff(coords=coords)
+        # get the correct electrostatic parameters
+        charges, pol_charges, alpha, qm_charges = self._prepare_electrostatics(
+            qm_idx=qm_idx, pol_idx=pol_idx
+        )
+        # select only the mm part
+        (
+            mm_atomic_numbers,
+            mm_resids,
+            mm_coordinates,
+            mm_charges,
+            mm_alpha,
+        ) = _filter_indices(
+            self.atomic_numbers,
+            self.resids,
+            coords,
+            charges,
+            alpha,
+            indices=mm_idx,
+        )
+        connectivity = self._build_connectivity_matrix(mm_top)
+        # maybe use a postfix (e.g., to avoid clashes when multiple
+        # mmp files are used at once)
+        mmp_fname = self._maybe_use_postfix(mmp_postfix)
+
+        write_mmp_input(
+            fname=mmp_fname,
+            atomic_numbers=mm_atomic_numbers,
+            coordinates=mm_coordinates,
+            resid=mm_resids,
+            static_charges=mm_charges,
+            polarizabilities=mm_alpha,
+            connectivity=connectivity,
+        )
+
+        system = ommp.OMMPSystem(mmp_fname)
+
+        return system
+
     def potential_approx_ipd(
         self,
         coords: np.ndarray,
         mmp_postfix: int = None,
         return_system: bool = False,
-    ):
+    ) -> np.ndarray:
         """potential of approximate induced dipoles on the qm atoms
 
         Computes the potential of approximate induced dipoles on the qm
