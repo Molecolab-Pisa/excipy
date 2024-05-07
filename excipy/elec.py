@@ -159,7 +159,6 @@ def link_atom_smear(
     alphas: np.ndarray,
 ):
     for idx in qm_idx:
-
         is_link_atom = False
         charge = 0.0
         pol_charge = 0.0

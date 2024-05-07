@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, List, Tuple, Iterator, Any
 
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, cg
@@ -13,11 +14,14 @@ from .util import (
     pbar,
 )
 from .elec import (
-    compute_polarizabilities,
+    read_electrostatics,
+    link_atom_smear,
     WANGAL_FACTOR,
     electric_field,
 )
-from .selection import spherical_cutoff
+from .selection import spherical_cutoff, _whole_residues_mm_cutoff
+
+Trajectory = Union[pt.Trajectory, pt.TrajectoryIterator]
 
 
 # =============================================================================
@@ -213,364 +217,393 @@ def _compute_cut_mask(env_mask: np.ndarray, pol_idx: np.ndarray):
     return cut_mask
 
 
-def mmpol_coupling(
-    coords,
-    coords1,
-    coords2,
-    charges1,
-    charges2,
-    polarizabilities,
-    env_mask,
-    pol_threshold,
-    full_connect,
-):
+def _read_polar_and_smear(
+    topology: pt.Topology,
+    qm_idx: np.ndarray,
+    db: str = None,
+    mol2: str = None,
+    smear_link: bool = True,
+) -> np.ndarray:
+    """reads the polarizabilities and applies a smearing for link atoms
+
+    Reads the polarizabilities from the top or the database, and applies
+    a smearing if the QM regions cuts through a bond. The mol2 is used
+    to recognize e.g. residues at the ends of the protein chain.
     """
-    Compute the MMPol contribution to the TrEsp Coulomb coupling.
-    Arguments
-    ---------
-    coords           : ndarray, (num_atoms, 3)
-                     Cartesian coordinates of every atom
-    coords1          : ndarray, (num_atoms_1, 3)
-                     Cartesian coordinates of the first molecule
-    coords2          : ndarray, (num_atoms_2, 3)
-                     Cartesian coordinates of the second molecule
-    charges1         : ndarray, (num_atoms_1,)
-                     Charges of the first molecule
-    charges2         : ndarray, (num_atoms_2,)
-                     Charges of the second molecule
-    polarizabilities : ndarray, (num_atoms,)
-                     Atomic polarizabilities
-    env_mask         : ndarray, (num_atoms,)
-                     Environment mask, True if the atom belongs to the environment,
-                     False otherwise.
-    pol_threshold    : float
-                     Polarization threshold
-    full_connect     : ndarray, (num_atoms, max_connections)
-                     Connectivity matrix
-    """
-    # Get the `cut_mask`, or polarization mask, that selects the polarizable
-    # atoms within the given cutoff
-    num_pol, pol_coords, pol_idx, _ = spherical_cutoff(
-        source_coords=np.concatenate((coords1, coords2), axis=0),
-        ext_coords=coords[env_mask],
-        cutoff=pol_threshold,
+    # read only the polarizabilities now
+    _, _, polarizabilities = read_electrostatics(
+        topology,
+        db=db,
+        mol2=mol2,
+        warn=True,
     )
-    cut_mask = _compute_cut_mask(env_mask=env_mask, pol_idx=pol_idx)
-    # exclude atoms with polarizability of zero
-    alpha = polarizabilities[cut_mask]
-    cut_mask[polarizabilities == 0] = False
-    pol_coords = pol_coords[alpha != 0]
-    alpha = alpha[np.where(alpha != 0)[0]]
-    # Compute the neighbor list of polarizable atoms, needed for the fortran routine
-    nn_list = _build_pol_neighbor_list(full_connect, cut_mask)
-    # Convert to Bohr
-    pol_coords, coords1, coords2 = _angstrom2bohr(pol_coords, coords1, coords2)
-    # Compute the electric fields of the two
-    # molecules at the positions of polarizable atoms
-    electric_field1 = electric_field(pol_coords, coords1, charges1)
-    electric_field2 = electric_field(pol_coords, coords2, charges2)
-    alpha3 = np.column_stack((alpha, alpha, alpha))
-    num_atoms = len(alpha)
-    # We only support WangAL polar model for now
+    # kept here for back compatibility, but the
+    # correct thing to do is to apply the smearing
+    if smear_link:
+        _, _, polarizabilities = link_atom_smear(
+            topology,
+            qm_idx,
+            np.zeros_like(polarizabilities),
+            np.zeros_like(polarizabilities),
+            polarizabilities,
+        )
+    return polarizabilities
+
+
+# ============================================================================
+# Handy functions to compute the cutoff
+# ============================================================================
+
+
+def _pol_from_spherical_cutoff(
+    topology: pt.Topology,
+    qm_mask: str,
+    qm_coords: np.ndarray,
+    full_coords: np.ndarray,
+    pol_cut: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """spherical cutoff
+
+    Applies a spherical cut around the QM region.
+    All the atoms within the pol_cut distance are retained.
+    This means that many MM residues will likely be split in a half.
+    """
+    env_mask = compute_environment_mask(topology, qm_mask, qm_mask)
+    env_idx = np.arange(topology.n_atoms)[env_mask]
+    _, pol_coords, pol_idx, _ = spherical_cutoff(
+        source_coords=qm_coords,
+        ext_coords=full_coords[env_idx],
+        cutoff=pol_cut,
+    )
+    # indices of the pol atoms in the full system
+    pol_idx = env_idx[pol_idx]
+    return pol_coords, pol_idx
+
+
+def _pol_from_whole_cutoff(
+    topology: pt.Topology, qm_mask: str, full_coords: np.ndarray, pol_cut: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """whole residues cuto
+
+    Applies a cut around the QM region where MM residues are
+    kept intact. More expensive than performing a spherical cutoff.
+    """
+    _, pol_coords, _, pol_idx, _ = _whole_residues_mm_cutoff(
+        topology=topology,
+        coords=full_coords,
+        qm_mask=qm_mask,
+        mm_cut=pol_cut,
+    )
+    return pol_coords, pol_idx
+
+
+def _apply_pol_cutoff(
+    topology: pt.Topology,
+    qm_mask: str,
+    qm_coords: np.ndarray,
+    full_coords: np.ndarray,
+    pol_cut: float,
+    strategy: str,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """polarization cut
+
+    Applies a cut to the polarization part according to the
+    selected strategy. If the strategy is spherical, a spherical
+    cut is performed. If the strategy is whole, residues of the
+    environment will be kept intact.
+    """
+    if strategy.lower() == "spherical":
+        pol_coords, pol_idx = _pol_from_spherical_cutoff(
+            topology,
+            qm_mask,
+            qm_coords,
+            full_coords,
+            pol_cut,
+        )
+    elif strategy == "whole":
+        pol_coords, pol_idx = _pol_from_whole_cutoff(
+            topology,
+            qm_mask,
+            full_coords,
+            pol_cut,
+        )
+    else:
+        raise ValueError('cutoff strategy must be either "spherical" or "whole"')
+    return pol_coords, pol_idx
+
+
+def _exclude_zero_polar(
+    polarizabilities: np.ndarray, pol_idx: np.ndarray, pol_coords: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """exclude pol atoms with zero polarizability
+
+    Exclude pol atoms with zero polarizability to avoid problems
+    when setting up the linear system.
+    """
+    # polarizabilities for the pol atoms only
+    alpha = polarizabilities[pol_idx]
+    # exclude pol atoms with zero polarizability
+    nonzero = alpha != 0.0
+    pol_idx = pol_idx[nonzero]
+    pol_coords = pol_coords[nonzero]
+    alpha = alpha[nonzero]
+    return pol_coords, pol_idx, alpha
+
+
+def _pol_cut_mask(num_atoms: int, pol_idx: np.ndarray) -> np.ndarray:
+    cut_mask = np.zeros(num_atoms, dtype=bool)
+    cut_mask[pol_idx] = True
+    return cut_mask
+
+
+def _solve_mu_ind(
+    alpha: np.ndarray,
+    electric_field: np.ndarray,
+    pol_coords: np.ndarray,
+    nn_list: np.ndarray,
+    iscreen: int = 1,
+    dodiag: bool = True,
+) -> Tuple[np.ndarray, Any]:
+    """solves for the induced dipoles
+
+    Solves for the induced dipoles using a preconditioned conjugate gradient
+    solver.
+    """
+    n_pol_atoms = len(alpha)
     thole = _compute_thole_factor(alpha)
-    # Define linear operators for TMu and preconditioner
+    alpha3 = np.column_stack((alpha, alpha, alpha))
     TT = TmuOperator(
-        n_atoms=num_atoms,
+        n_atoms=n_pol_atoms,
         func=tmu_fortran_wrapper,
         alpha=alpha,
         thole=thole,
         pol_coords=pol_coords,
-        iscreen=1,
+        iscreen=iscreen,
         nn_list=nn_list,
-        dodiag=True,
+        dodiag=dodiag,
     )
-    preconditioner = LinearOperator(TT.shape, matvec=lambda x: alpha3.ravel() * x)
-    # Solve preconditioned Conjugate Gradient
-    mu, info = cg(TT, electric_field1.ravel(), M=preconditioner, tol=1e-4)
-    Vmmp = -np.sum(mu * electric_field2.ravel())
-    return Vmmp * HARTREE2CM_1
+    precond = LinearOperator(TT.shape, matvec=lambda x: alpha3.ravel() * x)
+    mu, info = cg(TT, electric_field.ravel(), M=precond, tol=1e-4)
+    return mu, info
 
 
-def mmpol_site_contribution(
-    coords,
-    coords1,
-    charges1,
-    polarizabilities,
-    env_mask,
-    pol_threshold,
-    full_connect,
-):
-    """
-    Compute the MMPol contribution to the TrEsp Coulomb coupling.
-    Arguments
-    ---------
-    coords           : ndarray, (num_atoms, 3)
-                     Cartesian coordinates of every atom
-    coords1          : ndarray, (num_atoms_1, 3)
-                     Cartesian coordinates of the first molecule
-    coords2          : ndarray, (num_atoms_2, 3)
-                     Cartesian coordinates of the second molecule
-    charges1         : ndarray, (num_atoms_1,)
-                     Charges of the first molecule
-    charges2         : ndarray, (num_atoms_2,)
-                     Charges of the second molecule
-    polarizabilities : ndarray, (num_atoms,)
-                     Atomic polarizabilities
-    env_mask         : ndarray, (num_atoms,)
-                     Environment mask, True if the atom belongs to the environment,
-                     False otherwise.
-    pol_threshold    : float
-                     Polarization threshold
-    full_connect     : ndarray, (num_atoms, max_connections)
-                     Connectivity matrix
-    """
-    # Get the `cut_mask`, or polarization mask, that selects the polarizable
-    # atoms within the given cutoff
-    num_pol, pol_coords, pol_idx, _ = spherical_cutoff(
-        source_coords=coords1,
-        ext_coords=coords[env_mask],
-        cutoff=pol_threshold,
-    )
-    cut_mask = _compute_cut_mask(env_mask=env_mask, pol_idx=pol_idx)
-    # exclude atoms with polarizability of zero
-    alpha = polarizabilities[cut_mask]
-    cut_mask[polarizabilities == 0] = False
-    pol_coords = pol_coords[alpha != 0]
-    alpha = alpha[np.where(alpha != 0)[0]]
-    # Compute the neighbor list of polarizable atoms, needed for the fortran routine
-    nn_list = _build_pol_neighbor_list(full_connect, cut_mask)
-    # Convert to Bohr
-    pol_coords, coords1 = _angstrom2bohr(pol_coords, coords1)
-    # Compute the electric fields of the two
-    # molecules at the positions of polarizable atoms
-    electric_field1 = electric_field(pol_coords, coords1, charges1)
-    alpha3 = np.column_stack((alpha, alpha, alpha))
-    num_atoms = len(alpha)
-    # We only support WangAL polar model for now
-    thole = _compute_thole_factor(alpha)
-    # Define linear operators for TMu and preconditioner
-    TT = TmuOperator(
-        n_atoms=num_atoms,
-        func=tmu_fortran_wrapper,
-        alpha=alpha,
-        thole=thole,
-        pol_coords=pol_coords,
-        iscreen=1,
-        nn_list=nn_list,
-        dodiag=True,
-    )
-    preconditioner = LinearOperator(TT.shape, matvec=lambda x: alpha3.ravel() * x)
-    # Solve preconditioned Conjugate Gradient
-    mu, info = cg(TT, electric_field1.ravel(), M=preconditioner, tol=1e-4)
-    Vmmp = -np.sum(mu * electric_field1.ravel())
-    return Vmmp * HARTREE2CM_1
-
-
-# =============================================================================
-# High Level Wrappers
-# =============================================================================
-
-
-def compute_mmpol_coupling(
-    trajectory, coords, charges, residue_ids, masks, pair, pol_threshold
-):
-    """
-    Compute MMPol contribution to the Coulomb coupling of a pair of chromophores.
-    Arguments
-    ---------
-    trajectory    : pytraj.Trajectory
-                    Trajectory object.
-    coords        : list of ndarray (num_frames, num_atoms, 3)
-                    Coordinates of the chromophores pair
-    charges       : list of ndarray, (num_atoms,)
-                    Charges of the chromophores pair
-    residue_ids   : list of int
-                    Residue IDs
-    masks         : list of str
-                    Mask of the chromophore
-    pol_threshold : float
-                    Polarization threshold
-    Returns
-    -------
-    mmpol_couplings : ndarray, (num_frames,)
-                      MMPol contributions to the Coulomb Coupling.
-    """
-    topology = trajectory.topology
-    num_frames = trajectory.n_frames
-    connectivity = build_connectivity_matrix(topology, count_as="fortran")
-    polarizabilities = compute_polarizabilities(topology)
-    mmpol_couplings = []
-    resid1 = residue_ids[pair[0]]
-    resid2 = residue_ids[pair[1]]
-    iterator = pbar(
+def _set_iterator(trajectory: Trajectory, desc: str) -> Iterator:
+    return pbar(
         pt.iterframe(trajectory),
-        total=num_frames,
-        desc=f": {resid1}_{resid2} MMPol contribution:",
+        total=trajectory.n_frames,
+        desc=desc,
         ncols=79,
     )
-    # iterator = pt.iterframe(trajectory)
+
+
+# ============================================================================
+# Coupling
+# ============================================================================
+
+
+def mmpol_coup_lr(
+    trajectory: Trajectory,
+    coords1: np.ndarray,
+    coords2: np.ndarray,
+    charges1: np.ndarray,
+    charges2: np.ndarray,
+    residue_id1: str,
+    residue_id2: str,
+    mask1: str,
+    mask2: str,
+    pol_threshold: float,
+    db: str = None,
+    mol2: str = None,
+    cut_strategy: str = "spherical",
+    smear_link: bool = True,
+) -> Tuple[np.ndarray, List[np.ndarray]]:
+    """V_LR along a trajectory
+
+    Computes the linear response term of the electronic coupling along
+    a trajectory for a specific pair of chromophores.
+    """
+    topology = trajectory.topology
+    num_atoms = topology.n_atoms
+    qm1_idx = topology.select(mask1)
+    qm2_idx = topology.select(mask2)
+    qm_idx = np.concatenate((qm1_idx, qm2_idx))
+    # read polarizabilities + apply link atom smearing
+    polarizabilities = _read_polar_and_smear(topology, qm_idx, db, mol2, smear_link)
+    connectivity = build_connectivity_matrix(topology, count_as="fortran")
+    iterator = _set_iterator(
+        trajectory, f": {residue_id1}_{residue_id2} MMPol Linear Response:"
+    )
+    coups = []
+    dipoles = []
     for i, frame in enumerate(iterator):
         full_coords = frame.xyz.copy()
-        coords1 = coords[pair[0]][i]
-        coords2 = coords[pair[1]][i]
-        charges1 = charges[pair[0]][i]
-        charges2 = charges[pair[1]][i]
-        # Compute the environment mask
-        env_mask = compute_environment_mask(
-            topology,
-            masks[pair[0]],
-            masks[pair[1]],
+        qm1_coords = coords1[i]
+        qm2_coords = coords2[i]
+        qm1_charges = charges1[i]
+        qm2_charges = charges2[i]
+        pair_mask = make_pair_mask(mask1, mask2)
+        qm_coords = np.concatenate((qm1_coords, qm2_coords), axis=0)
+        pol_coords, pol_idx = _apply_pol_cutoff(
+            topology, pair_mask, qm_coords, full_coords, pol_threshold, cut_strategy
         )
-        V_mmp = mmpol_coupling(
-            full_coords,
-            coords1,
-            coords2,
-            charges1,
-            charges2,
-            polarizabilities,
-            env_mask,
-            pol_threshold,
-            connectivity,
+        pol_coords, pol_idx, alpha = _exclude_zero_polar(
+            polarizabilities, pol_idx, pol_coords
         )
-        mmpol_couplings.append(V_mmp)
-    mmpol_couplings = np.asarray(mmpol_couplings)
-    return mmpol_couplings
+        cut_mask = _pol_cut_mask(num_atoms, pol_idx)
+        nn_list = _build_pol_neighbor_list(connectivity, cut_mask)
+        pol_coords, qm1_coords, qm2_coords = _angstrom2bohr(
+            pol_coords, qm1_coords, qm2_coords
+        )
+        elec_field1 = electric_field(pol_coords, qm1_coords, qm1_charges)
+        elec_field2 = electric_field(pol_coords, qm2_coords, qm2_charges)
+        mu, info = _solve_mu_ind(
+            alpha, elec_field1, pol_coords, nn_list, iscreen=1, dodiag=True
+        )
+        Vmmp = -np.sum(mu * elec_field2.ravel())
+        Vmmp *= HARTREE2CM_1
+
+        coups.append(Vmmp)
+        dipoles.append(mu)
+
+    return np.array(coups), dipoles
 
 
-def compute_mmpol_couplings(
-    trajectory, coords, charges, residue_ids, masks, pairs, pol_threshold
-):
+def batch_mmpol_coup_lr(
+    trajectory: Trajectory,
+    coords: List[np.ndarray],
+    charges: List[np.ndarray],
+    residue_ids: List[str],
+    masks: List[str],
+    pairs: List[List[int]],
+    pol_threshold: float,
+    cut_strategy: str = "spherical",
+    smear_link: bool = True,
+    db: str = None,
+    mol2: str = None,
+) -> Tuple[List[np.ndarray], List[List[np.ndarray]]]:
+    """V_LR along a trajectory
+
+    Computes the Linear Response term of the electronic coupling
+    along a trajectory and for all the pairs specified in `pairs`.
     """
-    Compute MMPol contribution to the Coulomb coupling along a trajectory.
-    Arguments
-    ---------
-    trajectory    : pytraj.Trajectory
-                    Trajectory object.
-    coords        : list of ndarray (num_frames, num_atoms, 3)
-                    Coordinates of the chromophores pairs
-    charges       : list of ndarray, (num_atoms,)
-                    Charges of the chromophores pairs
-    residue_ids   : list of int
-                    Residue IDs
-    masks         : list of str
-                    Mask of the chromophores
-    pol_threshold : float
-                    Polarization threshold
-    Returns
-    -------
-    mmpol_couplings : list of ndarray, (num_frames,)
-                    List of MMPol contributions to the Coulomb Coupling.
-    """
-    mmpol_couplings = []
-    for pair in pairs:
-        mmp_coup = compute_mmpol_coupling(
+    out_lr = []
+    out_mu = []
+    for i1, i2 in pairs:
+        coup_lr, mu = mmpol_coup_lr(
             trajectory,
-            coords=coords,
-            charges=charges,
-            residue_ids=residue_ids,
-            masks=masks,
-            pair=pair,
+            coords1=coords[i1],
+            coords2=coords[i2],
+            charges1=charges[i1],
+            charges2=charges[i2],
+            residue_id1=residue_ids[i1],
+            residue_id2=residue_ids[i2],
+            mask1=masks[i1],
+            mask2=masks[i2],
             pol_threshold=pol_threshold,
+            db=db,
+            mol2=mol2,
+            cut_strategy=cut_strategy,
+            smear_link=smear_link,
         )
-        mmpol_couplings.append(mmp_coup)
-    return mmpol_couplings
+        out_lr.append(coup_lr)
+        out_mu.append(mu)
+    return out_lr, out_mu
 
 
-def compute_mmpol_site_energy(
-    trajectory, coords, charges, residue_id, mask, pol_threshold
-):
-    """
-    Compute MMPol contribution to the site energy of a single
-    chromophore.
-    Arguments
-    ---------
-    trajectory    : pytraj.Trajectory
-                    Trajectory object.
-    coords        : ndarray (num_frames, num_atoms, 3)
-                    Coordinates of the chromophore
-    charges       : ndarray, (num_atoms,)
-                    Charges of the chromophore
-    residue_id    : int
-                    Residue ID
-    mask          : str
-                    Mask of the chromophore
-    pol_threshold : float
-                    Polarization threshold
-    Returns
-    -------
-    mmpol_site_contribs : ndarray, (num_frames,)
-                          MMPol shifts to the site energy.
+# ============================================================================
+# Site energy
+# ============================================================================
+
+
+def mmpol_site_lr(
+    trajectory: Trajectory,
+    coords: np.ndarray,
+    charges: np.ndarray,
+    residue_id: str,
+    mask: str,
+    pol_threshold: float,
+    db: str = None,
+    mol2: str = None,
+    cut_strategy: str = "spherical",
+    smear_link: bool = True,
+) -> Tuple[np.ndarray, List[np.ndarray]]:
+    """E_LR along a trajectory
+
+    Computes the Linear Response term of the excitation energy along
+    a trajectory for a single residue.
     """
     topology = trajectory.topology
-    num_frames = trajectory.n_frames
+    num_atoms = topology.n_atoms
+    qm_idx = topology.select(mask)
+    # read polarizabilities + apply link atom smearing
+    polarizabilities = _read_polar_and_smear(topology, qm_idx, db, mol2, smear_link)
+    # connectivity is needed only for the tmu solver
     connectivity = build_connectivity_matrix(topology, count_as="fortran")
-    polarizabilities = compute_polarizabilities(topology)
-    mmpol_site_contribs = []
-    iterator = pbar(
-        pt.iterframe(trajectory),
-        total=num_frames,
-        desc=f": {residue_id} MMPol contribution:",
-        ncols=79,
-    )
-    # iterator = pt.iterframe(trajectory)
+    iterator = _set_iterator(trajectory, f": {residue_id} MMPol Linear Response:")
+
+    energies = []
+    dipoles = []
     for i, frame in enumerate(iterator):
         full_coords = frame.xyz.copy()
-        coords1 = coords[i]
-        charges1 = charges[i]
-        # Compute the environment mask
-        env_mask = compute_environment_mask(
-            topology,
-            mask,
-            mask,
+        qm_coords = coords[i]
+        qm_charges = charges[i]
+        pol_coords, pol_idx = _apply_pol_cutoff(
+            topology, mask, qm_coords, full_coords, pol_threshold, cut_strategy
         )
-        site_mmp = mmpol_site_contribution(
-            full_coords,
-            coords1,
-            charges1,
-            polarizabilities,
-            env_mask,
-            pol_threshold,
-            connectivity,
+        pol_coords, pol_idx, alpha = _exclude_zero_polar(
+            polarizabilities, pol_idx, pol_coords
         )
-        mmpol_site_contribs.append(site_mmp)
-    mmpol_site_contribs = np.asarray(mmpol_site_contribs)
-    return mmpol_site_contribs
+        cut_mask = _pol_cut_mask(num_atoms, pol_idx)
+        nn_list = _build_pol_neighbor_list(connectivity, cut_mask)
+        pol_coords, qm_coords = _angstrom2bohr(pol_coords, qm_coords)
+        elec_field = electric_field(pol_coords, qm_coords, qm_charges)
+        # mu induced by electric field
+        mu, info = _solve_mu_ind(
+            alpha, elec_field, pol_coords, nn_list, iscreen=1, dodiag=True
+        )
+        # interaction with source field
+        Vmmp = -np.sum(mu * elec_field.ravel())
+        Vmmp *= HARTREE2CM_1
+
+        # collect
+        energies.append(Vmmp)
+        dipoles.append(mu)
+
+    return np.array(energies), dipoles
 
 
-def compute_mmpol_site_energies(
-    trajectory, coords, charges, residue_ids, masks, pol_threshold
-):
+def batch_mmpol_site_lr(
+    trajectory: Trajectory,
+    coords: List[np.ndarray],
+    charges: List[np.ndarray],
+    residue_ids: List[str],
+    masks: List[str],
+    pol_threshold: float,
+    cut_strategy: str = "spherical",
+    smear_link: bool = True,
+    db: str = None,
+    mol2: str = None,
+) -> Tuple[List[np.ndarray], List[List[np.ndarray]]]:
+    """E_LR along a trajectory
+
+    Computes the Linear Response term of the energy along a trajectory
+    for all the residues listed in `residue_ids`.
     """
-    Compute the MMPol contribution to the site energy of a series of
-    chromophores.
-    Arguments
-    ---------
-    trajectory    : pytraj.Trajectory
-                    Trajectory object.
-    coords        : list of ndarray (num_frames, num_atoms, 3)
-                    Coordinates of the chromophores
-    charges       : list of ndarray (num_atoms,)
-                    Charges of the chromophores
-    residue_ids   : list of int
-                    Residue IDs of the chromophores
-    masks         : list of str
-                    Masks of the chromophores
-    pol_threshold : float
-                    Polarization threshold
-    Returns
-    -------
-    mmpol_site_contribs : list of ndarray (num_frames,)
-                          MMPol shifts to the site energy.
-    """
-    mmpol_site_energies = []
+    out_lr = []
+    out_mu = []
     for coord, charge, residue_id, mask in zip(coords, charges, residue_ids, masks):
-        mmp_site = compute_mmpol_site_energy(
+        site_lr, mu = mmpol_site_lr(
             trajectory,
             coords=coord,
             charges=charge,
             residue_id=residue_id,
             mask=mask,
             pol_threshold=pol_threshold,
+            db=db,
+            mol2=mol2,
+            cut_strategy=cut_strategy,
+            smear_link=smear_link,
         )
-        mmpol_site_energies.append(mmp_site)
-    return mmpol_site_energies
+        out_lr.append(site_lr)
+        out_mu.append(mu)
+    return out_lr, out_mu
