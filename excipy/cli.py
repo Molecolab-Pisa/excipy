@@ -47,7 +47,7 @@ from excipy.util import (
 )
 
 if excipy.available_polarizable_module:
-    from excipy.polar import compute_mmpol_couplings, compute_mmpol_site_energies
+    from excipy.polar import batch_mmpol_site_lr, batch_mmpol_coup_lr
 
 
 def logo():
@@ -468,7 +468,7 @@ def compute_couplings(traj, args):  # noqa: C901
 
             print_action("Computing MMPol contribution")
             # MMPol contributions
-            mmpol_couplings = compute_mmpol_couplings(
+            mmpol_couplings, _ = batch_mmpol_coup_lr(
                 traj,
                 coords=coords,
                 charges=env_tresp,
@@ -476,6 +476,10 @@ def compute_couplings(traj, args):  # noqa: C901
                 masks=masks,
                 pairs=above_threshold_pairs_idx,
                 pol_threshold=args.pol_cutoff,
+                db=None,
+                mol2=None,
+                cut_strategy="spherical",
+                smear_link=True,
             )
             print_predicted_couplings(
                 mmpol_couplings, above_threshold_pairs_ids, kind="V_mmpol"
@@ -690,13 +694,17 @@ def _compute_mmp_site_shift(traj, coords, masks, types, args, charges):
                       Dictionary with keys "y_mean" and "y_var", each of which
                       is a list of ndarrays (one for each chromophore).
     """
-    mmp_site_shifts = compute_mmpol_site_energies(
+    mmp_site_shifts, _ = batch_mmpol_site_lr(
         trajectory=traj,
         coords=coords,
         charges=charges,
         residue_ids=args.residue_ids,
         masks=masks,
         pol_threshold=args.pol_cutoff,
+        db=None,
+        mol2=None,
+        cut_strategy="spherical",
+        smear_link=True,
     )  # cm-1
     mmp_site_shifts = [(s / EV2CM).reshape(-1, 1) for s in mmp_site_shifts]
     mmp_site_shifts = {
