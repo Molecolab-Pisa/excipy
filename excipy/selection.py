@@ -356,7 +356,7 @@ def _whole_residues_mm_cutoff(
         mm_idx: indices of the MM atoms in the original topology, (num_mm,)
         mm_top: pytraj topology containing only the MM part
     """
-    mm_mask = "!" + qm_mask
+    mm_mask = "!(" + qm_mask + ")"
     mm_top = topology[mm_mask]
     qm_idx = topology.select(qm_mask)
     mm_idx = topology.select(mm_mask)
