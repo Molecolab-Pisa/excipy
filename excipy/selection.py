@@ -312,6 +312,13 @@ def spherical_cutoff(
         source_coords: coordinates of the source part
         ext_coords: coordinates of the external part
         cutoff: cutoff for the external part
+
+    Returns:
+        num_ext: number of selected external atoms
+        ext_coords: coordinates of the selected external atoms
+        ext_idx: indices of the selected external atoms
+        dist: distances between the selected external atoms
+              and the source atoms
     """
     ext_idx = np.arange(ext_coords.shape[0])
     dist = cdist(ext_coords, source_coords)
@@ -319,8 +326,9 @@ def spherical_cutoff(
     ext_mask = min_dist <= cutoff
     ext_idx = ext_idx[ext_mask]
     ext_coords = ext_coords[ext_mask]
+    dist = dist[ext_mask]
     num_ext = ext_idx.shape[0]
-    return num_ext, ext_coords, ext_idx
+    return num_ext, ext_coords, ext_idx, dist
 
 
 # ============================================================
