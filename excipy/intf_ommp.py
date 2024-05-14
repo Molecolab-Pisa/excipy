@@ -8,7 +8,7 @@ from itertools import repeat
 import numpy as np
 import pyopenmmpol as ommp
 
-from .util import build_connectivity_matrix, ANG2BOHR
+from .util import build_connectivity_matrix, ANG2BOHR, HARTREE2CM_1
 from .selection import _whole_residues_mm_cutoff, _whole_residues_pol_cutoff
 from .elec import read_electrostatics, link_atom_smear
 
@@ -398,3 +398,74 @@ class OMMPInterface:
                 pot.append(pot_)
             pot = np.asarray(pot)
             return pot
+
+    def direct_linear_response(
+        self,
+        coords: np.ndarray,
+        source_coords: np.ndarray,
+        source_charges: np.ndarray,
+        target_coords: np.ndarray,
+        target_charges: np.ndarray,
+        mmp_postfix: Optional[str] = None,
+        ommp_system: Optional[ommp.OMMPSystem] = None,
+    ):
+        """computes the direct linear response term
+
+        Computes the direct linear response term appearing in the site
+        energy and in the electronic coupling. This term reads:
+
+            LR = - Σ_i E_i(q_target) μ_i(q_source)
+
+        where E_i(q_target) is the electric field of the target charge
+        distribution evaluated at the i-th polarizable site, and
+        μ_i(q_source) is the dipole at the i-th site induced by the
+        charge distribution q_source. Both q_target and q_source are assumed
+        to be discrete/atomic representations of target and source transition
+        densities. For the site energy, the target and the source coincide.
+        For the coupling, they are associated with two different chromophores.
+
+        Args:
+            coords: coordinates of the whole system in Angstrom
+            source_coords: coordinates of the source atoms in Angstrom
+            source_charges: charges of the source atoms
+            target_coords: coordinates of the target atoms in Angstrom
+            target_charges: charges of the target atoms
+            mmp_postfix: optional postfix for the .mmp file used to instantiate
+                         the OMMPSystem
+            ommp_system: instance of OMMPSystem. If given, this system is used
+                         and coords will be ignored.
+        Returns:
+            lr: the direct linear response term.
+        """
+        # create the system if none is provided
+        if ommp_system is None:
+            system = self.prepare_ommp_system(coords=coords, mmp_postfix=mmp_postfix)
+        else:
+            system = ommp_system
+
+        # convert to Bohr
+        source_coords = source_coords.copy() * ANG2BOHR
+        target_coords = target_coords.copy() * ANG2BOHR
+
+        source_helper = ommp.OMMPQmHelper(
+            coord_qm=source_coords,
+            charge_qm=source_charges,
+            z_qm=np.zeros_like(source_charges),  # not used
+        )
+        source_helper.prepare_qm_ele_ene(system)
+
+        target_helper = ommp.OMMPQmHelper(
+            coord_qm=target_coords,
+            charge_qm=target_charges,
+            z_qm=np.zeros_like(target_charges),  # not used
+        )
+        target_helper.prepare_qm_ele_ene(system)
+
+        # solve for the induced dipoles
+        system.set_external_field(source_helper.E_n2p, nomm=True)
+
+        # direct linear response term
+        lr = -np.sum(target_helper.E_n2p.ravel() * system.ipd.ravel())
+        lr *= HARTREE2CM_1
+
+        return lr
