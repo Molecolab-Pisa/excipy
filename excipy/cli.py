@@ -483,6 +483,7 @@ def compute_couplings(traj, args):  # noqa: C901
                 mol2=None,
                 cut_strategy="spherical",
                 smear_link=True,
+                turnoff_mask=args.turnoff_mask,
             )
             print_predicted_couplings(
                 mmpol_couplings, above_threshold_pairs_ids, kind="V_mmpol"
@@ -708,6 +709,7 @@ def _compute_mmp_site_shift(traj, coords, masks, types, args, charges):
         mol2=None,
         cut_strategy="spherical",
         smear_link=True,
+        turnoff_mask=args.turnoff_mask,
     )  # cm-1
     mmp_site_shifts = [(s / EV2CM).reshape(-1, 1) for s in mmp_site_shifts]
     mmp_site_shifts = {

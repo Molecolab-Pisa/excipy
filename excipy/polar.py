@@ -223,6 +223,7 @@ def _read_polar_and_smear(
     db: str = None,
     mol2: str = None,
     smear_link: bool = True,
+    turnoff_mask: str = None,
 ) -> np.ndarray:
     """reads the polarizabilities and applies a smearing for link atoms
 
@@ -237,6 +238,10 @@ def _read_polar_and_smear(
         mol2=mol2,
         warn=True,
     )
+    if turnoff_mask:
+        # shut down the polarizability for turnoff atoms
+        toff_idx = topology.select(turnoff_mask)
+        polarizabilities[toff_idx] = 0.0
     # kept here for back compatibility, but the
     # correct thing to do is to apply the smearing
     if smear_link:
@@ -416,6 +421,7 @@ def mmpol_coup_lr(
     mol2: str = None,
     cut_strategy: str = "spherical",
     smear_link: bool = True,
+    turnoff_mask: str = None,
 ) -> Tuple[np.ndarray, List[np.ndarray]]:
     """V_LR along a trajectory
 
@@ -428,7 +434,9 @@ def mmpol_coup_lr(
     qm2_idx = topology.select(mask2)
     qm_idx = np.concatenate((qm1_idx, qm2_idx))
     # read polarizabilities + apply link atom smearing
-    polarizabilities = _read_polar_and_smear(topology, qm_idx, db, mol2, smear_link)
+    polarizabilities = _read_polar_and_smear(
+        topology, qm_idx, db, mol2, smear_link, turnoff_mask
+    )
     connectivity = build_connectivity_matrix(topology, count_as="fortran")
     iterator = _set_iterator(
         trajectory, f": {residue_id1}_{residue_id2} MMPol Linear Response:"
@@ -480,6 +488,7 @@ def batch_mmpol_coup_lr(
     smear_link: bool = True,
     db: str = None,
     mol2: str = None,
+    turnoff_mask: str = None,
 ) -> Tuple[List[np.ndarray], List[List[np.ndarray]]]:
     """V_LR along a trajectory
 
@@ -504,6 +513,7 @@ def batch_mmpol_coup_lr(
             mol2=mol2,
             cut_strategy=cut_strategy,
             smear_link=smear_link,
+            turnoff_mask=turnoff_mask,
         )
         out_lr.append(coup_lr)
         out_mu.append(mu)
@@ -526,6 +536,7 @@ def mmpol_site_lr(
     mol2: str = None,
     cut_strategy: str = "spherical",
     smear_link: bool = True,
+    turnoff_mask: str = None,
 ) -> Tuple[np.ndarray, List[np.ndarray]]:
     """E_LR along a trajectory
 
@@ -536,7 +547,9 @@ def mmpol_site_lr(
     num_atoms = topology.n_atoms
     qm_idx = topology.select(mask)
     # read polarizabilities + apply link atom smearing
-    polarizabilities = _read_polar_and_smear(topology, qm_idx, db, mol2, smear_link)
+    polarizabilities = _read_polar_and_smear(
+        topology, qm_idx, db, mol2, smear_link, turnoff_mask
+    )
     # connectivity is needed only for the tmu solver
     connectivity = build_connectivity_matrix(topology, count_as="fortran")
     iterator = _set_iterator(trajectory, f": {residue_id} MMPol Linear Response:")
@@ -583,6 +596,7 @@ def batch_mmpol_site_lr(
     smear_link: bool = True,
     db: str = None,
     mol2: str = None,
+    turnoff_mask: str = None,
 ) -> Tuple[List[np.ndarray], List[List[np.ndarray]]]:
     """E_LR along a trajectory
 
@@ -603,6 +617,7 @@ def batch_mmpol_site_lr(
             mol2=mol2,
             cut_strategy=cut_strategy,
             smear_link=smear_link,
+            turnoff_mask=turnoff_mask,
         )
         out_lr.append(site_lr)
         out_mu.append(mu)
