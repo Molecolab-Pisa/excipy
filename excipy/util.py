@@ -598,6 +598,7 @@ def rescale_tresp(charges, scalings):
     """
     scaled_tresp = []
     for charge, scaling in zip(charges, scalings):
+        charge = charge.copy()
         charge *= scaling
         scaled_tresp.append(charge)
     return scaled_tresp

@@ -7,25 +7,9 @@ from argparse import ArgumentParser
 from collections import defaultdict
 
 import excipy
-from excipy.trajectory import parse_masks
-from excipy.descriptors import (
-    get_coulomb_matrix,
-    get_MM_elec_potential,
-    encode_geometry,
-)
-from excipy.regression import predict_tresp_charges, predict_site_energies
-from excipy.database import (
-    get_atom_names,
-    get_hydrogens,
-    get_identical_atoms,
-    get_rescalings,
-    select_masks,
-    set_database_folder,
-    get_site_model_params,
-)
+from excipy.database import set_database_folder
 from excipy.elec import compute_coulomb_couplings
 from excipy.util import (
-    EV2CM,
     create_hdf5_outfile,
     save_n_frames,
     save_residue_ids,
@@ -35,19 +19,17 @@ from excipy.util import (
     save_dipoles,
     save_coulomb_couplings,
     save_site_energies,
-    load_tresp_charges,
     load_n_frames,
     load_as_exat,
     dump_exat_files,
-    rescale_tresp,
-    read_molecule_types,
     Colors,
-    get_dipoles,
     block_average,
 )
 
+from excipy.molecule import Molecule
+
 if excipy.available_polarizable_module:
-    from excipy.polar import batch_mmpol_site_lr, batch_mmpol_coup_lr
+    from excipy.polar import batch_mmpol_coup_lr
 
 
 def logo():
@@ -328,61 +310,27 @@ def print_end():
 # =============================================================================
 
 
-def compute_couplings(traj, args):  # noqa: C901
+def compute_couplings(molecules, args):  # noqa: C901
     print_section("COULOMB COUPLINGS")
 
-    # Get the residue types (residue names)
-    topology = pt.load_topology(args.parameters)
-    types = read_molecule_types(topology, args.residue_ids)
-    # Load atom names from the database
-    atom_names = get_atom_names(types)
-    # Load groups of identical atoms from the database
-    # (used for the coulomb matrix encoding for the couplings)
-    permute_groups = get_identical_atoms(types)
-    # Setup the selection masks
-    masks = select_masks(args.residue_ids, atom_names)
+    n_molecules = len(molecules)
 
-    # Parse masks to obtain the coordinates
-    print_action("Loading chromophore coordinates")
-    coords, atnums = parse_masks(traj, masks, atom_names)
-
-    # At this stage we can dump the coordinates in the output
-    # as we are not omitting atoms
-    save_coords(coords, args.residue_ids, args.outfile)
-    save_atom_numbers(atnums, args.residue_ids, args.outfile)
-
-    n_atoms = [c.shape[1] for c in coords]
-    print_molecules(types, args.residue_ids, n_atoms)
-
-    # Create a bunch of CoulombMatrix descriptors
-    # These objects are needed as they store the permutation transformation
-    coulomb_matrices = get_coulomb_matrix(
-        coords=coords,
-        atnums=atnums,
-        residue_ids=args.residue_ids,
-        permute_groups=permute_groups,
-    )
-    # Encode the molecular geometry as a Coulomb Matrix
-    print_action("Encoding molecules")
-    encodings = encode_geometry(coulomb_matrices, free_attr=["coords"])
-
-    # Predict the TrEsp charges
+    # Predict tresp charges
     print_action("Predicting vacuum TrEsp charges")
-    vac_tresp = predict_tresp_charges(
-        encodings, coulomb_matrices, types, args.residue_ids
-    )
-    # Delete the encodings to save space as they are no more needed
-    del encodings
+    vac_tresp = [mol.vac_tresp for mol in molecules]
     save_tresp_charges(vac_tresp, args.residue_ids, kind="vac", outfile=args.outfile)
-    vac_tr_dipoles = get_dipoles(coords, vac_tresp)
+
+    # Predicted vacuum transition dipoles
+    vac_tr_dipoles = [mol.vac_tr_dipole for mol in molecules]
     save_dipoles(vac_tr_dipoles, args.residue_ids, kind="vac", outfile=args.outfile)
 
     # Do not compute couplings if there is only one molecule
-    if len(coords) < 2:
+    if n_molecules < 2:
         pass
     else:
         print_action("Computing vacuum couplings")
         # Compute the couplings using the predicted TrEsp charges
+        coords = [mol.coords for mol in molecules]
 
         predicted_couplings, pairs_ids = compute_coulomb_couplings(
             coords, vac_tresp, args.residue_ids, args.cutoff, args.coup_list
@@ -397,13 +345,14 @@ def compute_couplings(traj, args):  # noqa: C901
                 predicted_couplings, pairs_ids, kind="vac", outfile=args.outfile
             )
 
-    # We always provide an estimate of the TrEsp charges in environment
+    # Predict TrEsp charges in polarizable environment
     print_action("Rescaling TrEsp and Coulomb couplings")
-    env_scalings = get_rescalings(types)
-    env_tresp = rescale_tresp(vac_tresp, env_scalings)
-    save_tresp_charges(env_tresp, args.residue_ids, kind="env", outfile=args.outfile)
-    env_tr_dipoles = get_dipoles(coords, env_tresp)
-    save_dipoles(env_tr_dipoles, args.residue_ids, kind="env", outfile=args.outfile)
+    pol_tresp = [mol.pol_tresp for mol in molecules]
+    save_tresp_charges(pol_tresp, args.residue_ids, kind="env", outfile=args.outfile)
+
+    # Predict transition dipoles in polarizable environment
+    pol_tr_dipoles = [mol.pol_tr_dipole for mol in molecules]
+    save_dipoles(pol_tr_dipoles, args.residue_ids, kind="env", outfile=args.outfile)
 
     # Do not compute couplings if there is only one molecule
     if len(coords) < 2:
@@ -435,6 +384,8 @@ def compute_couplings(traj, args):  # noqa: C901
                 above_threshold_pairs_idx.append(
                     (args.residue_ids.index(p[0]), args.residue_ids.index(p[1]))
                 )
+
+            env_scalings = [mol.tresp_pol_scaling for mol in molecules]
 
             coup_scalings = [
                 env_scalings[idx[0]] * env_scalings[idx[1]]
@@ -471,10 +422,11 @@ def compute_couplings(traj, args):  # noqa: C901
 
             print_action("Computing MMPol contribution")
             # MMPol contributions
+            masks = [mol.mask for mol in molecules]
             mmpol_couplings, _ = batch_mmpol_coup_lr(
-                traj,
+                molecules[0].traj,  # not nice but ok
                 coords=coords,
-                charges=env_tresp,
+                charges=pol_tresp,
                 residue_ids=args.residue_ids,
                 masks=masks,
                 pairs=above_threshold_pairs_idx,
@@ -511,7 +463,7 @@ def compute_couplings(traj, args):  # noqa: C901
             )
 
 
-def _compute_vac_site_energies(coords, atnums, types, args):
+def _compute_vac_site_energies(molecules, args):
     """
     Compute the site energies in vacuum along a trajectory.
     Arguments
@@ -533,42 +485,24 @@ def _compute_vac_site_energies(coords, atnums, types, args):
                 Dictionary with keys "y_mean" and "y_var", each of which
                 is a list of ndarrays (one for each chromophore).
     """
-    encodings = []
     sites_vac = defaultdict(list)
 
-    # load the model parameters here to save time
-    model_params = {t: get_site_model_params(t, kind="vac") for t in set(types)}
-
-    for coord, atnum, residue_id, type in zip(coords, atnums, args.residue_ids, types):
-        # Encode geometry returns a list: get the first (and only) element.
-        # Same for `get_coulomb_matrix`.
-        coul_mat = get_coulomb_matrix(
-            coords=(coord,),
-            atnums=(atnum,),
-            residue_ids=(residue_id,),
-            permute_groups=None,
-        )
-        encoding = encode_geometry(coul_mat)
-        encodings.append(encoding[0])
-        # Predict the site energy
-        site_vac = predict_site_energies(
-            encoding[0], type, model_params[type], residue_id, kind="vac"
-        )
-        # site_vac = predict_site_energies_old(encoding, (type,), (residue_id,), kind='vac')
+    for mol in molecules:
+        site_vac = mol.vac_site_energy
         sites_vac["y_mean"].append(site_vac["y_mean"])
         sites_vac["y_var"].append(site_vac["y_var"])
         # Save the site energy
         save_site_energies(
             site_vac["y_mean"],
             site_vac["y_var"],
-            residue_id,
+            mol.resid,
             kind="vac",
             outfile=args.outfile,
         )
-    return encodings, sites_vac
+    return sites_vac
 
 
-def _compute_env_site_shift(traj, masks, internal_encodings, types, args):
+def _compute_env_site_shift(molecules, args):
     """
     Arguments
     ---------
@@ -591,44 +525,21 @@ def _compute_env_site_shift(traj, masks, internal_encodings, types, args):
     """
     sites_env_shift = defaultdict(list)
 
-    # load the model parameters here to save time
-    model_params = {t: get_site_model_params(t, kind="env") for t in set(types)}
-
-    for internal_encoding, mask, type, residue_id in zip(
-        internal_encodings, masks, types, args.residue_ids
-    ):
-        # Cutoff in Angstrom, hardcoded to 30. (our models are trained using this cutoff)
-        # frames=None means all frames.
-        # charges_db=None means take charges from topology
-        elec_potential = get_MM_elec_potential(
-            traj=traj,
-            masks=(mask,),
-            cutoff=30.0,
-            frames=None,
-            turnoff_mask=args.turnoff_mask,
-            charges_db=None,
-            remove_mean=False,
-        )
-        ep_encoding = encode_geometry(elec_potential)
-        encoding = [
-            np.column_stack([i, p]) for p, i in zip(ep_encoding, (internal_encoding,))
-        ]
-        site_env_shift = predict_site_energies(
-            encoding[0], type, model_params[type], residue_id, kind="env"
-        )
+    for mol in molecules:
+        site_env_shift = mol.ee_shift_site_energy
         sites_env_shift["y_mean"].append(site_env_shift["y_mean"])
         sites_env_shift["y_var"].append(site_env_shift["y_var"])
         save_site_energies(
             site_env_shift["y_mean"],
             site_env_shift["y_var"],
-            residue_id,
+            mol.resid,
             kind="env_shift",
             outfile=args.outfile,
         )
     return sites_env_shift
 
 
-def _compute_env_site_energies(sites_vac, sites_env_shift, args):
+def _compute_env_site_energies(molecules, args):
     """
     Sum the @VAC, @ENV contributions to the site energies to obtain the total
     site energy in a non-polarizable environment.
@@ -649,33 +560,26 @@ def _compute_env_site_energies(sites_vac, sites_env_shift, args):
                       Dictionary with keys "y_mean" and "y_var", each of which
                       is a list of ndarrays (one for each chromophore).
     """
-    sites_env = dict()
-    sites_env["y_mean"] = [
-        vac_e + shift_e
-        for vac_e, shift_e in zip(sites_vac["y_mean"], sites_env_shift["y_mean"])
-    ]
-    sites_env["y_var"] = [
-        vac_e + shift_e
-        for vac_e, shift_e in zip(sites_vac["y_var"], sites_env_shift["y_var"])
-    ]
+    sites_env = defaultdict(list)
+    for mol in molecules:
+        site_env = mol.ee_site_energy
+        sites_env["y_mean"].append(site_env["y_mean"])
+        sites_env["y_var"].append(site_env["y_var"])
+        save_site_energies(
+            site_env["y_mean"],
+            site_env["y_var"],
+            mol.resid,
+            kind="env",
+            outfile=args.outfile,
+        )
     if (len(sites_env["y_mean"]) != len(args.residue_ids)) or (
         len(sites_env["y_var"]) != len(args.residue_ids)
     ):
         raise RuntimeError
-    for y_mean, y_var, residue_id in zip(
-        sites_env["y_mean"], sites_env["y_var"], args.residue_ids
-    ):
-        save_site_energies(
-            y_mean,
-            y_var,
-            residue_id,
-            kind="env",
-            outfile=args.outfile,
-        )
     return sites_env
 
 
-def _compute_mmp_site_shift(traj, coords, masks, types, args, charges):
+def _compute_mmp_site_shift(molecules, args):
     """
     Arguments
     ---------
@@ -698,42 +602,26 @@ def _compute_mmp_site_shift(traj, coords, masks, types, args, charges):
                       Dictionary with keys "y_mean" and "y_var", each of which
                       is a list of ndarrays (one for each chromophore).
     """
-    mmp_site_shifts, _ = batch_mmpol_site_lr(
-        trajectory=traj,
-        coords=coords,
-        charges=charges,
-        residue_ids=args.residue_ids,
-        masks=masks,
-        pol_threshold=args.pol_cutoff,
-        db=None,
-        mol2=None,
-        cut_strategy="spherical",
-        smear_link=True,
-        turnoff_mask=args.turnoff_mask,
-    )  # cm-1
-    mmp_site_shifts = [(s / EV2CM).reshape(-1, 1) for s in mmp_site_shifts]
-    mmp_site_shifts = {
-        "y_mean": mmp_site_shifts,
-        "y_var": [np.zeros(s.shape) for s in mmp_site_shifts],
-    }
+    mmp_site_shifts = defaultdict(list)
+    for mol in molecules:
+        site = mol.pol_LR_site_energy
+        mmp_site_shifts["y_mean"].append(site["y_mean"])
+        mmp_site_shifts["y_var"].append(site["y_var"])
+        save_site_energies(
+            site["y_mean"],
+            site["y_var"],
+            mol.resid,
+            kind="env_pol_shift",
+            outfile=args.outfile,
+        )
     if (len(mmp_site_shifts["y_mean"]) != len(args.residue_ids)) or (
         len(mmp_site_shifts["y_var"]) != len(args.residue_ids)
     ):
         raise RuntimeError
-    for y_mean, y_var, residue_id in zip(
-        mmp_site_shifts["y_mean"], mmp_site_shifts["y_var"], args.residue_ids
-    ):
-        save_site_energies(
-            y_mean,
-            y_var,
-            residue_id,
-            kind="env_pol_shift",
-            outfile=args.outfile,
-        )
     return mmp_site_shifts
 
 
-def _compute_mmp_site_energies(sites_vac, sites_env_shift, sites_mmp_shift, args):
+def _compute_mmp_site_energies(molecules, args):
     """
     Sum the @VAC, @ENV, @POL contributions to the site energies to obtain the total
     site energy in a polarizable environment.
@@ -758,35 +646,26 @@ def _compute_mmp_site_energies(sites_vac, sites_env_shift, sites_mmp_shift, args
                       Dictionary with keys "y_mean" and "y_var", each of which
                       is a list of ndarrays (one for each chromophore).
     """
-    sites_mmp = dict()
-    sites_mmp["y_mean"] = [
-        vac_e + shift_e + shift_p
-        for vac_e, shift_e, shift_p in zip(
-            sites_vac["y_mean"], sites_env_shift["y_mean"], sites_mmp_shift["y_mean"]
+    sites_mmp = defaultdict(list)
+    for mol in molecules:
+        site = mol.pol_site_energy
+        sites_mmp["y_mean"].append(site["y_mean"])
+        sites_mmp["y_var"].append(site["y_var"])
+        save_site_energies(
+            site["y_mean"],
+            site["y_var"],
+            mol.resid,
+            kind="env_pol",
+            outfile=args.outfile,
         )
-    ]
-    sites_mmp["y_var"] = [
-        vac_e + shift_e
-        for vac_e, shift_e in zip(sites_vac["y_var"], sites_env_shift["y_var"])
-    ]
     if (len(sites_mmp["y_mean"]) != len(args.residue_ids)) or (
         len(sites_mmp["y_var"]) != len(args.residue_ids)
     ):
         raise RuntimeError
-    for y_mean, y_var, residue_id in zip(
-        sites_mmp["y_mean"], sites_mmp["y_var"], args.residue_ids
-    ):
-        save_site_energies(
-            y_mean,
-            y_var,
-            residue_id,
-            kind="env_pol",
-            outfile=args.outfile,
-        )
     return sites_mmp
 
 
-def compute_site_energies(traj, args):
+def compute_site_energies(molecules, args):
     """
     Predict site energies along a trajectory
     Arguments
@@ -797,19 +676,10 @@ def compute_site_energies(traj, args):
               CLI arguments.
     """
     print_section("SITE ENERGIES @VAC")
-    # Get the residue types (residue names)
-    topology = pt.load_topology(args.parameters)
-    types = read_molecule_types(topology, args.residue_ids)
-    # Coulomb Matrix without hydrogens
-    hydrogen_atoms = get_hydrogens(types)
-    atom_names = get_atom_names(types, exclude_atoms=hydrogen_atoms)
-    masks = select_masks(args.residue_ids, atom_names)
-    print_action("Loading Coordinates")
-    coords, atnums = parse_masks(traj, masks, atom_names)
     print_action("Encoding Geometries and Predicting Sites")
     # Encodings: Coulomb Matrices without permutations of atoms, hydrogen excluded
     # sites_vac: Site energies in vacuum.
-    encodings, sites_vac = _compute_vac_site_energies(coords, atnums, types, args)
+    sites_vac = _compute_vac_site_energies(molecules, args)
     print_predicted_sitens(sites_vac["y_mean"], args.residue_ids, kind="E_vac")
 
     if not args.no_site_env:
@@ -817,16 +687,14 @@ def compute_site_energies(traj, args):
         # Also here we use Coulomb Matrices with no hydrogens
         # for the internal part.
         # MM Potentials
-        atom_names = get_atom_names(types)
-        masks = select_masks(args.residue_ids, atom_names)
         print_action(
             "Computing MM Electrostatic Potentials and Predicting Electrochromic Shift"
         )
-        sites_env_shift = _compute_env_site_shift(traj, masks, encodings, types, args)
+        sites_env_shift = _compute_env_site_shift(molecules, args)
         print_predicted_sitens(
             sites_env_shift["y_mean"], args.residue_ids, kind="E_env_shift"
         )
-        sites_env = _compute_env_site_energies(sites_vac, sites_env_shift, args)
+        sites_env = _compute_env_site_energies(molecules, args)
         print_predicted_sitens(
             sites_env["y_mean"],
             args.residue_ids,
@@ -835,35 +703,13 @@ def compute_site_energies(traj, args):
 
         if excipy.available_polarizable_module and not args.no_site_pol:
             print_section("SITE ENERGIES @MMPol")
-            atom_names = get_atom_names(types)
-            masks = select_masks(args.residue_ids, atom_names)
-            coords, atnums = parse_masks(traj, masks, atom_names)
-            # We try to obtain the environment TrEsp charges from the output file
-            try:
-                env_tresp = load_tresp_charges(args.outfile, kind="env")
-            except KeyError:
-                raise RuntimeError(
-                    "Environment TrEsp not found. MMPol contribution to the "
-                    " site energy is not computable."
-                )
-
-            charges = [env_tresp[r] for r in args.residue_ids]
-            sites_mmp_shift = _compute_mmp_site_shift(
-                traj=traj,
-                coords=coords,
-                masks=masks,
-                types=types,
-                args=args,
-                charges=charges,
-            )
+            sites_mmp_shift = _compute_mmp_site_shift(molecules, args)
             print_predicted_sitens(
                 sites_mmp_shift["y_mean"],
                 args.residue_ids,
                 kind="E_pol_shift",
             )
-            sites_mmp = _compute_mmp_site_energies(
-                sites_vac, sites_env_shift, sites_mmp_shift, args
-            )
+            sites_mmp = _compute_mmp_site_energies(molecules, args)
             print_predicted_sitens(
                 sites_mmp["y_mean"],
                 args.residue_ids,
@@ -1080,11 +926,39 @@ def main():
     traj = pt.iterload(args.coordinates, top=args.parameters, frame_slice=frame_slice)
     save_n_frames(traj.n_frames, args.outfile)
 
+    # Define molecules
+    molecules = [
+        Molecule(
+            traj=traj,
+            resid=resid,
+            elec_cutoff=30.0,
+            pol_cutoff=args.pol_cutoff,
+            turnoff_mask=args.turnoff_mask,
+            charges_db=None,
+            template_mol2=None,
+        )
+        for resid in args.residue_ids
+    ]  # TODO: add possibility to provide charges_db and template_mol2
+
+    # Print info on loaded molecules
+    n_atoms = [mol.n_atoms for mol in molecules]
+    types = [mol.type for mol in molecules]
+    print_molecules(types, args.residue_ids, n_atoms)
+
+    # Dump molecule coordinates
+    print_action("Loading chromophore coordinates")
+    coords = [mol.coords for mol in molecules]
+    atnums = [mol.atnums for mol in molecules]
+
+    # Dump coords to file
+    save_coords(coords, args.residue_ids, args.outfile)
+    save_atom_numbers(atnums, args.residue_ids, args.outfile)
+
     if not args.no_coup:
-        compute_couplings(traj, args)
+        compute_couplings(molecules, args)
 
     if not args.no_siten:
-        compute_site_energies(traj, args)
+        compute_site_energies(molecules, args)
 
     print_end()
 
