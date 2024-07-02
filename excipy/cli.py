@@ -405,19 +405,6 @@ def compute_couplings(traj, args):  # noqa: C901
     env_tr_dipoles = get_dipoles(coords, env_tresp)
     save_dipoles(env_tr_dipoles, args.residue_ids, kind="env", outfile=args.outfile)
 
-    # Identify couplings above a chosen threshold (by taking the max value on the traj)
-    # We will compute env and pol couplings only for these latter
-
-    # Select the couplings above the threshold in at least one frame
-    max_coup = abs(np.array(predicted_couplings)).max(axis=1)
-    threshold_mask = np.where(max_coup > args.env_coup_threshold)[0]
-
-    # Create a list of couplings above threshold to rescale
-    above_threshold_couplings = [predicted_couplings[pos] for pos in threshold_mask]
-
-    # Keep trace of the pair ids we selected
-    above_threshold_pairs_ids = [pairs_ids[pos] for pos in threshold_mask]
-
     # Do not compute couplings if there is only one molecule
     if len(coords) < 2:
         pass
@@ -426,6 +413,22 @@ def compute_couplings(traj, args):  # noqa: C901
         if predicted_couplings is None:
             pass
         else:
+
+            # Identify couplings above a chosen threshold (by taking the max value on the traj)
+            # We will compute env and pol couplings only for these latter
+
+            # Select the couplings above the threshold in at least one frame
+            max_coup = abs(np.array(predicted_couplings)).max(axis=1)
+            threshold_mask = np.where(max_coup > args.env_coup_threshold)[0]
+
+            # Create a list of couplings above threshold to rescale
+            above_threshold_couplings = [
+                predicted_couplings[pos] for pos in threshold_mask
+            ]
+
+            # Keep trace of the pair ids we selected
+            above_threshold_pairs_ids = [pairs_ids[pos] for pos in threshold_mask]
+
             # Create a list of the pair indeces above the threshold
             above_threshold_pairs_idx = []
             for p in above_threshold_pairs_ids:
