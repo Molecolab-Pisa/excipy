@@ -239,7 +239,7 @@ def _read_polar_and_smear(
         warn=True,
     )
     if turnoff_mask:
-        # shut down the polarizability for turnoff atoms
+        # shut down polarizability for turnoff atoms
         toff_idx = topology.select(turnoff_mask)
         polarizabilities[toff_idx] = 0.0
     # kept here for back compatibility, but the

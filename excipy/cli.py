@@ -171,6 +171,14 @@ def cli_parse(argv):
     )
 
     opt(
+        "--models",
+        required=False,
+        metavar="KEY=VALUE",
+        nargs="+",
+        help="Specify the desired model for each molecule.",
+    )
+
+    opt(
         "--database_folder",
         required=False,
         default=None,
@@ -212,6 +220,21 @@ def parse_frames(frames, n_frames, return_slice=False):
         return (start, stop, step)
     else:
         return np.arange(start, stop, step)
+
+
+def parse_models(models):
+    model_dict = dict()
+    if models:
+        for key_value in models:
+            key, value = key_value.split("=")
+            key = key.strip().upper()
+            model_dict[key] = value.upper()
+    else:
+        # provide a default
+        model_dict["CLA"] = "JCTC2023"
+        model_dict["CHL"] = "JCTC2023"
+        model_dict["BCL"] = "JCTC2023"
+    return model_dict
 
 
 # =============================================================================
@@ -526,7 +549,7 @@ def _compute_env_site_shift(molecules, args):
     sites_env_shift = defaultdict(list)
 
     for mol in molecules:
-        site_env_shift = mol.ee_shift_site_energy
+        site_env_shift = mol.env_shift_site_energy
         sites_env_shift["y_mean"].append(site_env_shift["y_mean"])
         sites_env_shift["y_var"].append(site_env_shift["y_var"])
         save_site_energies(
@@ -562,7 +585,7 @@ def _compute_env_site_energies(molecules, args):
     """
     sites_env = defaultdict(list)
     for mol in molecules:
-        site_env = mol.ee_site_energy
+        site_env = mol.env_site_energy
         sites_env["y_mean"].append(site_env["y_mean"])
         sites_env["y_var"].append(site_env["y_var"])
         save_site_energies(
@@ -912,6 +935,8 @@ def main():
     args, parser = cli_parse(sys.argv)
     print_cli_arguments(args)
 
+    models = parse_models(args.models)
+
     print_begin()
 
     # If a custom database is specified, set the new database paths
@@ -931,6 +956,7 @@ def main():
         Molecule(
             traj=traj,
             resid=resid,
+            model_dict=models,
             elec_cutoff=30.0,
             pol_cutoff=args.pol_cutoff,
             turnoff_mask=args.turnoff_mask,
