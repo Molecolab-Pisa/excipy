@@ -1,5 +1,8 @@
 from __future__ import annotations
+from typing import Dict, Union
 import functools
+
+import numpy as np
 
 from .util import read_molecule_types, get_dipoles
 from .database import (
@@ -9,22 +12,51 @@ from .database import (
     get_hydrogens,
 )
 from .trajectory import parse_masks
-from .descriptors import get_coulomb_matrix, encode_geometry, get_MM_elec_potential
+from .descriptors import (
+    get_coulomb_matrix,
+    encode_geometry,
+    get_MM_elec_potential,
+)
 from .models import available_models
 
 
 class Molecule:
     def __init__(
         self,
-        traj,
-        resid,
-        model_dict,
-        elec_cutoff=30.0,
-        pol_cutoff=20.0,
-        turnoff_mask=None,
-        charges_db=None,
-        template_mol2=None,
-    ):
+        traj: "pytraj.TrajectoryIterator",  # noqa: F821
+        resid: Union[str, int],
+        model_dict: Dict[str, str],
+        elec_cutoff: float = 30.0,
+        pol_cutoff: float = 20.0,
+        turnoff_mask: str = None,
+        charges_db: str = None,
+        template_mol2: str = None,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        traj: pt.Trajectory
+            pytraj TrajectoryIterator
+        resid: str or int
+            resid number
+        model_dict: dict
+            dictionary mapping the molecule type with the model name
+        elec_cutoff: float
+            cutoff for the static electrostatics potential descriptor
+        pol_cutoff: float
+            cutoff for the polarizable part of electrostatics
+        turnoff_mask: str
+            AMBER mask. Atoms matching the mask are excluded from the
+            electrostatics (static and polarizable)
+        charges_db: str
+            path to the charges database file, useful to use different
+            sets of charges when accounting for polarization.
+        template_mol2: str
+            path to the template mol2 file, which should be used together
+            (but it's not necessary) with the charges database, in order
+            to e.g. distinguish terminal residues (not identifiable from
+            the prmtop).
+        """
         self.traj = traj
         self.resid = str(resid)
         # residue type (CLA, CHL, ...)
@@ -57,7 +89,7 @@ class Molecule:
         # tempalte mol2 (e.g. to recognize terminal residues)
         self.template_mol2 = template_mol2
 
-    def get_model(self, model_dict):
+    def get_model(self, model_dict: Dict[str, str]) -> "Model":  # noqa: F821
         try:
             model_str = model_dict[self.type]
         except KeyError as e:
@@ -68,21 +100,21 @@ class Molecule:
 
     @property
     @functools.lru_cache()
-    def coords(self):
+    def coords(self) -> np.ndarray:
         coords, atnums = parse_masks(self.traj, [self.mask], [self.atom_names])
         self.atnums = atnums[0]
         return coords[0]
 
     @property
     @functools.lru_cache()
-    def coords_noh(self):
+    def coords_noh(self) -> np.ndarray:
         coords, atnums = parse_masks(self.traj, [self.mask_noh], [self.atom_names_noh])
         self.atnums_noh = atnums[0]
         return coords[0]
 
     @property
     @functools.lru_cache()
-    def permuted_coulmat(self):
+    def permuted_coulmat(self) -> "CoulombMatrix":  # noqa: F821
         coulmat = get_coulomb_matrix(
             coords=[self.coords],
             atnums=[self.atnums],
@@ -93,12 +125,12 @@ class Molecule:
 
     @property
     @functools.lru_cache()
-    def permuted_coulmat_encoding(self):
+    def permuted_coulmat_encoding(self) -> np.ndarray:
         return encode_geometry([self.permuted_coulmat], free_attr=["coords"])[0]
 
     @property
     @functools.lru_cache()
-    def coulmat_noh(self):
+    def coulmat_noh(self) -> "CoulombMatrix":  # noqa: F821
         coulmat = get_coulomb_matrix(
             coords=[self.coords_noh],
             atnums=[self.atnums_noh],
@@ -109,12 +141,12 @@ class Molecule:
 
     @property
     @functools.lru_cache()
-    def coulmat_noh_encoding(self):
+    def coulmat_noh_encoding(self) -> np.ndarray:
         return encode_geometry([self.coulmat_noh], free_attr=["coords"])[0]
 
     @property
     @functools.lru_cache()
-    def elec_potential(self):
+    def elec_potential(self) -> "MMElectrostaticPotential":  # noqa: F821
         return get_MM_elec_potential(
             traj=self.traj,
             masks=[self.mask],
@@ -127,50 +159,50 @@ class Molecule:
 
     @property
     @functools.lru_cache()
-    def elec_potential_encoding(self):
+    def elec_potential_encoding(self) -> np.ndarray:
         return encode_geometry([self.elec_potential])[0]
 
     @property
     @functools.lru_cache()
-    def vac_tresp(self):
+    def vac_tresp(self) -> np.ndarray:
         return self.model.vac_tresp(self)
 
     @property
     @functools.lru_cache()
-    def vac_tr_dipole(self):
+    def vac_tr_dipole(self) -> np.ndarray:
         return get_dipoles([self.coords], [self.vac_tresp])[0]
 
     @property
     @functools.lru_cache()
-    def pol_tresp(self):
+    def pol_tresp(self) -> np.ndarray:
         return self.model.pol_tresp(self)
 
     @property
     @functools.lru_cache()
-    def pol_tr_dipole(self):
+    def pol_tr_dipole(self) -> np.ndarray:
         return get_dipoles([self.coords], [self.pol_tresp])[0]
 
     @property
     @functools.lru_cache()
-    def vac_site_energy(self):
+    def vac_site_energy(self) -> Dict[str, np.ndarray]:
         return self.model.vac_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def env_shift_site_energy(self):
+    def env_shift_site_energy(self) -> Dict[str, np.ndarray]:
         return self.model.env_shift_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def env_site_energy(self):
+    def env_site_energy(self) -> Dict[str, np.ndarray]:
         return self.model.env_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def pol_LR_site_energy(self):
+    def pol_LR_site_energy(self) -> Dict[str, np.ndarray]:
         return self.model.pol_LR_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def pol_site_energy(self):
+    def pol_site_energy(self) -> Dict[str, np.ndarray]:
         return self.model.pol_site_energy(self)

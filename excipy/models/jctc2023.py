@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Dict, Tuple, List, Any
 
 from collections import defaultdict
 from functools import partial
@@ -37,7 +38,27 @@ from ..util import EV2CM, rescale_tresp, pbar
 #
 
 
-def predict_vac_site_energy(encoding, model_params, residue_id, chl):
+def predict_vac_site_energy(
+    encoding: np.ndarray, model_params: Dict[str, np.ndarray], chl: str
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Predicts the vacuum site energy using the Matern(5/2) kernel.
+
+    Parameters
+    ----------
+    encoding: np.ndarray
+        molecular encoding (Coulomb Matrix descriptor with no hydrogens)
+    model_params: dict
+        kernel and model parameters
+    chl: str
+        chlorophyll type (e.g. CLA, CHL, ...)
+
+    Returns
+    -------
+    mean: np.ndarray
+        GP posterior mean
+    variance: GP posterior variance
+    """
     # define a kernel functions that takes x and x_train only
     kernel_func = partial(
         matern52_kernel,
@@ -62,7 +83,29 @@ def predict_vac_site_energy(encoding, model_params, residue_id, chl):
     return mean, variance
 
 
-def predict_env_shift_site_energy(encoding, model_params, residue_id, chl):
+def predict_env_shift_site_energy(
+    encoding: np.ndarray, model_params: Dict[str, np.ndarray], chl: str
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Predicts the electrochromic shift in environment using a Matern(5/2)
+    kernel on the Coulomb Matrix descriptors with no hydrogens, and a linear
+    kernel on the electrostatic potential descriptor.
+
+    Parameters
+    ----------
+    encoding: np.ndarray
+        molecular encoding (Coulomb Matrix with no hydrogens and electrostatic potential descriptor)
+    model_params: dict
+        kernel and model parameters
+    chl: str
+        chlorophyll type (e.g., CLA, CHL, ...)
+
+    Returns
+    -------
+    mean: np.ndarray
+        GP posterior mean
+    variance: GP posterior variance
+    """
     # define a kernel function that takes x and x_train only
     kernel_func = partial(
         m52cm_linpot_kernel,
@@ -131,24 +174,28 @@ _PREDICT_SITE_ENERGIES_FUNCS = {
 # wrapper
 
 
-def predict_site_energies(encoding, type, model_params, residue_id, kind):
+def predict_site_energies(
+    encoding: np.ndarray, type: str, model_params: Dict[str, np.ndarray], kind: str
+) -> Dict[str, np.ndarray]:
     """
-    Predict the site energy of each molecule with Gaussian Process Regression.
-    Arguments
-    ---------
-    encodings   : list of ndarray, (num_samples, num_features)
-                Molecule encodings
-    types       : list of str
-                List of molecule types (used to fetch the model)
-    residue_ids : list of str
-                List of Residue IDs
-    kind        : str
-                Kind of site energy to predict (vac, env)
+    Predict the site energy of one molecule with Gaussian Process Regression.
+
+    Parameters
+    ----------
+    encoding: np.ndarray
+        molecular encoding
+    type: str
+        molecule type (e.g., CLA, CHL, ...)
+    model_params: dict
+        model and kernel parameters
+    kind: str
+        either "vac" or "env"
+
     Returns
     -------
-    site energies : defaultdict
-                  Dictionary with mean and variance of each
-                  prediction.
+    site energies: dict
+        dictionary with mean and variance of each
+        prediction.
     """
 
     iterator = pbar(
@@ -166,7 +213,7 @@ def predict_site_energies(encoding, type, model_params, residue_id, kind):
         # shape (1, n_features)
         x = np.atleast_2d(x)
 
-        mean, variance = func(x, model_params, residue_id)
+        mean, variance = func(x, model_params)
 
         siten["y_mean"].append(mean)
         siten["y_var"].append(variance)
@@ -177,23 +224,30 @@ def predict_site_energies(encoding, type, model_params, residue_id, kind):
     return siten
 
 
-def predict_tresp_charges(encodings, descriptors, types, residue_ids):
+def predict_tresp_charges(
+    encodings: List[np.ndarray],
+    descriptors: List[Any],
+    types: List[str],
+    residue_ids: List[str],
+) -> List[np.ndarray]:
     """
     Predict the TrEsp charges of each molecule.
-    Arguments
-    ---------
-    encodings    : list of ndarray, (num_samples, num_features)
-                 Molecule encodings
-    descriptors  : list of objects
-                 Descriptors
-    types        : list of str
-                 List of molecule types
-    residue_ids  : list of str
-                 List of Residue IDs
+
+    Parameters
+    ----------
+    encodings: list of ndarray, (num_samples, num_features)
+        Molecule encodings
+    descriptors: list of objects
+        Descriptors
+    types: list of str
+        List of molecule types
+    residue_ids: list of str
+        List of Residue IDs
+
     Returns
     -------
-    tresp_charges : list of ndarray, (num_samples, num_atoms)
-                  Predicted TrEsp charges
+    tresp_charges: list of ndarray, (num_samples, num_atoms)
+        Predicted TrEsp charges
     """
     iterator = pbar(
         zip(encodings, descriptors, types, residue_ids),
@@ -233,35 +287,33 @@ class Model_JCTC2023:
         pass
 
     @staticmethod
-    def vac_tresp(mol):
+    def vac_tresp(mol: "Molecule") -> np.ndarray:  # noqa: F821
         coulmat = mol.permuted_coulmat
         encoding = mol.permuted_coulmat_encoding
         return predict_tresp_charges([encoding], [coulmat], [mol.type], [mol.resid])[0]
 
     @staticmethod
-    def pol_tresp(mol):
+    def pol_tresp(mol: "Molecule") -> np.ndarray:  # noqa: F821
         scaling = get_rescalings([mol.type], "JCTC2023")[0]
         return rescale_tresp([mol.vac_tresp], [scaling])[0]
 
     @staticmethod
-    def vac_site_energy(mol):
+    def vac_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
         params = get_site_model_params(mol.type, kind="vac", model="JCTC2023")
         return predict_site_energies(
-            mol.coulmat_noh_encoding, mol.type, params, mol.resid, kind="vac"
+            mol.coulmat_noh_encoding, mol.type, params, kind="vac"
         )
 
     @staticmethod
-    def env_shift_site_energy(mol):
+    def env_shift_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
         params = get_site_model_params(mol.type, kind="env", model="JCTC2023")
         encoding = np.column_stack(
             [mol.coulmat_noh_encoding, mol.elec_potential_encoding]
         )
-        return predict_site_energies(
-            encoding, mol.type, params, mol.resid, kind="env_shift"
-        )
+        return predict_site_energies(encoding, mol.type, params, kind="env_shift")
 
     @staticmethod
-    def env_site_energy(mol):
+    def env_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
         sites = dict()
         sites["y_mean"] = (
             mol.vac_site_energy["y_mean"] + mol.env_shift_site_energy["y_mean"]
@@ -272,7 +324,7 @@ class Model_JCTC2023:
         return sites
 
     @staticmethod
-    def pol_LR_site_energy(mol):
+    def pol_LR_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
         lr, _ = mmpol_site_lr(
             mol.traj,
             coords=mol.coords,
@@ -292,7 +344,7 @@ class Model_JCTC2023:
         return sites
 
     @staticmethod
-    def pol_site_energy(mol):
+    def pol_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
         sites = dict()
         sites["y_mean"] = (
             mol.vac_site_energy["y_mean"]
