@@ -14,28 +14,7 @@ from ..regression import (
 )
 from ..polar import mmpol_site_lr
 from ..database import get_site_model_params, get_rescalings
-from ..util import EV2CM, rescale_tresp, pbar
-
-# Implementation of the available models
-#
-# Each model is a collection of functions that takes as input a molecule
-# object (see below). Each function uses properties of the molecule
-# object with no checks on whether these properties are there (mixin).
-# If you add more models, use the same pattern, and if you want to use a
-# property that the Molecule object does not posses, implement that property.
-# If all models are coherent, then in the CLI we can be agnostic about what
-# they really do.
-#
-# In theory, each model should implement the following predictions:
-#
-# * vacuum tresp
-# * environment tresp
-# * vacuum site energy
-# * environment shift
-# * environment site energy
-# * polarizable LR contribution
-# * polarizable site energy
-#
+from ..util import EV2CM, rescale_tresp, pbar, get_dipoles
 
 
 def predict_vac_site_energy(
@@ -279,8 +258,6 @@ class Model_JCTC2023:
         Journal of Chemical Theory and Computation 19.3 (2023).
     [2] Cignoni, Edoardo, Lorenzo Cupellini, and Benedetta Mennucci.
         Journal of Physics: Condensed Matter 34.30 (2022).
-
-    OK for Chlorophyll a, b, and Bacteriochloropyhll a.
     """
 
     def __init__(self):
@@ -288,17 +265,29 @@ class Model_JCTC2023:
 
     @staticmethod
     def vac_tresp(mol: "Molecule") -> np.ndarray:  # noqa: F821
+        "predicted vacuum tresp charges"
         coulmat = mol.permuted_coulmat
         encoding = mol.permuted_coulmat_encoding
         return predict_tresp_charges([encoding], [coulmat], [mol.type], [mol.resid])[0]
 
     @staticmethod
-    def pol_tresp(mol: "Molecule") -> np.ndarray:  # noqa: F821
+    def vac_tr_dipole(mol: "Molecule") -> np.ndarray:  # noqa: F821
+        "predicted vacuum transition dipole"
+        return get_dipoles([mol.coords], [mol.vac_tresp])[0]
+
+    @staticmethod
+    def env_tresp(mol: "Molecule") -> np.ndarray:  # noqa: F821
+        "predicted polarizable embedding tresp charges"
         scaling = get_rescalings([mol.type], "JCTC2023")[0]
         return rescale_tresp([mol.vac_tresp], [scaling])[0]
 
     @staticmethod
+    def env_tr_dipole(mol: "Molecule") -> np.ndarray:  # noqa: F821
+        return get_dipoles([mol.coords], [mol.env_tresp])[0]
+
+    @staticmethod
     def vac_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+        "predicted vacuum site energy"
         params = get_site_model_params(mol.type, kind="vac", model="JCTC2023")
         return predict_site_energies(
             mol.coulmat_noh_encoding, mol.type, params, kind="vac"
@@ -306,6 +295,7 @@ class Model_JCTC2023:
 
     @staticmethod
     def env_shift_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+        "predicted electrostatic embedding electrochromic shift"
         params = get_site_model_params(mol.type, kind="env", model="JCTC2023")
         encoding = np.column_stack(
             [mol.coulmat_noh_encoding, mol.elec_potential_encoding]
@@ -314,6 +304,7 @@ class Model_JCTC2023:
 
     @staticmethod
     def env_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+        "predicted electrostatic embedding site energy"
         sites = dict()
         sites["y_mean"] = (
             mol.vac_site_energy["y_mean"] + mol.env_shift_site_energy["y_mean"]
@@ -325,10 +316,11 @@ class Model_JCTC2023:
 
     @staticmethod
     def pol_LR_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+        "predicted polarizable embedding Linear Response contribution"
         lr, _ = mmpol_site_lr(
             mol.traj,
             coords=mol.coords,
-            charges=mol.pol_tresp,
+            charges=mol.env_tresp,
             residue_id=mol.resid,
             mask=mol.mask,
             pol_threshold=mol.pol_cutoff,
@@ -345,6 +337,7 @@ class Model_JCTC2023:
 
     @staticmethod
     def pol_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+        "predicted polarizable embedding site energy"
         sites = dict()
         sites["y_mean"] = (
             mol.vac_site_energy["y_mean"]

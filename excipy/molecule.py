@@ -4,7 +4,7 @@ import functools
 
 import numpy as np
 
-from .util import read_molecule_types, get_dipoles
+from .util import read_molecule_types
 from .database import (
     get_atom_names,
     get_identical_atoms,
@@ -98,9 +98,13 @@ class Molecule:
             )
         return available_models[self.type][model_str]
 
+    # Molecular properties that are independent of the ML model, and that can be
+    # used by the ML models to compute the various quantities of interest
+    #
     @property
     @functools.lru_cache()
     def coords(self) -> np.ndarray:
+        "molecular coordinates"
         coords, atnums = parse_masks(self.traj, [self.mask], [self.atom_names])
         self.atnums = atnums[0]
         return coords[0]
@@ -108,6 +112,7 @@ class Molecule:
     @property
     @functools.lru_cache()
     def coords_noh(self) -> np.ndarray:
+        "molecular coordinates with no hydrogens"
         coords, atnums = parse_masks(self.traj, [self.mask_noh], [self.atom_names_noh])
         self.atnums_noh = atnums[0]
         return coords[0]
@@ -115,6 +120,7 @@ class Molecule:
     @property
     @functools.lru_cache()
     def permuted_coulmat(self) -> "CoulombMatrix":  # noqa: F821
+        "permuted (for identical atoms only) coulomb matrix"
         coulmat = get_coulomb_matrix(
             coords=[self.coords],
             atnums=[self.atnums],
@@ -126,11 +132,13 @@ class Molecule:
     @property
     @functools.lru_cache()
     def permuted_coulmat_encoding(self) -> np.ndarray:
+        "permuted (for identical atoms only) coulomb matrix encoding"
         return encode_geometry([self.permuted_coulmat], free_attr=["coords"])[0]
 
     @property
     @functools.lru_cache()
     def coulmat_noh(self) -> "CoulombMatrix":  # noqa: F821
+        "coulomb matrix (offdiagonal) with no hydrogens"
         coulmat = get_coulomb_matrix(
             coords=[self.coords_noh],
             atnums=[self.atnums_noh],
@@ -142,11 +150,13 @@ class Molecule:
     @property
     @functools.lru_cache()
     def coulmat_noh_encoding(self) -> np.ndarray:
+        "coulomb matrix (offdiagonal) with no hydrogens encoding"
         return encode_geometry([self.coulmat_noh], free_attr=["coords"])[0]
 
     @property
     @functools.lru_cache()
     def elec_potential(self) -> "MMElectrostaticPotential":  # noqa: F821
+        "electrostatic potential on QM (or ML) atoms"
         return get_MM_elec_potential(
             traj=self.traj,
             masks=[self.mask],
@@ -160,49 +170,67 @@ class Molecule:
     @property
     @functools.lru_cache()
     def elec_potential_encoding(self) -> np.ndarray:
+        "electrostatic potential on QM (or ML) atoms encoding"
         return encode_geometry([self.elec_potential])[0]
 
+    # Quantities that are predicted by the ML models
+    # All these properties are implemented using "delegation"
+    # i.e. the calculation of each of these properties is
+    # delegated to the chosen ML model.
+    # If you require further properties, simply add them, but
+    # remember also to add the corresponding method to the Model
+    # class for consistency.
+    #
     @property
     @functools.lru_cache()
     def vac_tresp(self) -> np.ndarray:
+        "vacuum tresp charges"
         return self.model.vac_tresp(self)
 
     @property
     @functools.lru_cache()
     def vac_tr_dipole(self) -> np.ndarray:
-        return get_dipoles([self.coords], [self.vac_tresp])[0]
+        "vacuum transition dipole"
+        return self.model.vac_tr_dipole(self)
 
     @property
     @functools.lru_cache()
-    def pol_tresp(self) -> np.ndarray:
-        return self.model.pol_tresp(self)
+    def env_tresp(self) -> np.ndarray:
+        "polarizable embedding tresp charges"
+        return self.model.env_tresp(self)
 
     @property
     @functools.lru_cache()
-    def pol_tr_dipole(self) -> np.ndarray:
-        return get_dipoles([self.coords], [self.pol_tresp])[0]
+    def env_tr_dipole(self) -> np.ndarray:
+        "polarizable embedding transition dipole"
+        return self.model.env_tr_dipole(self)
 
     @property
     @functools.lru_cache()
     def vac_site_energy(self) -> Dict[str, np.ndarray]:
+        "vacuum site energy"
         return self.model.vac_site_energy(self)
 
     @property
     @functools.lru_cache()
     def env_shift_site_energy(self) -> Dict[str, np.ndarray]:
+        "environment electrochromic shift"
         return self.model.env_shift_site_energy(self)
 
     @property
     @functools.lru_cache()
     def env_site_energy(self) -> Dict[str, np.ndarray]:
+        "environment site energy"
         return self.model.env_site_energy(self)
 
     @property
     @functools.lru_cache()
     def pol_LR_site_energy(self) -> Dict[str, np.ndarray]:
+        "polarizable embedding Linear Response contribution"
         return self.model.pol_LR_site_energy(self)
 
     @property
     @functools.lru_cache()
     def pol_site_energy(self) -> Dict[str, np.ndarray]:
+        "polarizable embedding site energy"
         return self.model.pol_site_energy(self)

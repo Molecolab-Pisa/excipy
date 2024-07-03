@@ -370,12 +370,12 @@ def compute_couplings(molecules, args):  # noqa: C901
 
     # Predict TrEsp charges in polarizable environment
     print_action("Rescaling TrEsp and Coulomb couplings")
-    pol_tresp = [mol.pol_tresp for mol in molecules]
-    save_tresp_charges(pol_tresp, args.residue_ids, kind="env", outfile=args.outfile)
+    env_tresp = [mol.env_tresp for mol in molecules]
+    save_tresp_charges(env_tresp, args.residue_ids, kind="env", outfile=args.outfile)
 
     # Predict transition dipoles in polarizable environment
-    pol_tr_dipoles = [mol.pol_tr_dipole for mol in molecules]
-    save_dipoles(pol_tr_dipoles, args.residue_ids, kind="env", outfile=args.outfile)
+    env_tr_dipoles = [mol.env_tr_dipole for mol in molecules]
+    save_dipoles(env_tr_dipoles, args.residue_ids, kind="env", outfile=args.outfile)
 
     # Do not compute couplings if there is only one molecule
     if len(coords) < 2:
@@ -413,7 +413,7 @@ def compute_couplings(molecules, args):  # noqa: C901
 
             env_couplings, _ = compute_coulomb_couplings(
                 coords,
-                pol_tresp,
+                env_tresp,
                 args.residue_ids,
                 args.cutoff,
                 above_threshold_coup_list,
@@ -450,7 +450,7 @@ def compute_couplings(molecules, args):  # noqa: C901
             mmpol_couplings, _ = batch_mmpol_coup_lr(
                 molecules[0].traj,  # not nice but ok
                 coords=coords,
-                charges=pol_tresp,
+                charges=env_tresp,
                 residue_ids=args.residue_ids,
                 masks=masks,
                 pairs=above_threshold_pairs_idx,
