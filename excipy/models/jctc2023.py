@@ -14,7 +14,7 @@ from ..regression import (
 )
 from ..polar import mmpol_site_lr
 from ..database import get_site_model_params, get_rescalings
-from ..util import EV2CM, rescale_tresp, pbar, get_dipoles
+from ..util import EV2CM, rescale_tresp, pbar, get_dipoles, Prediction
 
 
 def predict_vac_site_energy(
@@ -155,7 +155,7 @@ _PREDICT_SITE_ENERGIES_FUNCS = {
 
 def predict_site_energies(
     encoding: np.ndarray, type: str, model_params: Dict[str, np.ndarray], kind: str
-) -> Dict[str, np.ndarray]:
+) -> Prediction:
     """
     Predict the site energy of one molecule with Gaussian Process Regression.
 
@@ -200,7 +200,7 @@ def predict_site_energies(
     for key in siten.keys():
         siten[key] = np.concatenate(siten[key], axis=0)
 
-    return siten
+    return Prediction(siten["y_mean"], siten["y_var"])
 
 
 def predict_tresp_charges(
@@ -208,7 +208,7 @@ def predict_tresp_charges(
     descriptors: List[Any],
     types: List[str],
     residue_ids: List[str],
-) -> List[np.ndarray]:
+) -> List[Prediction]:
     """
     Predict the TrEsp charges of each molecule.
 
@@ -247,7 +247,9 @@ def predict_tresp_charges(
         y_permuted = ridge.predict(encoding)
         inverse_permutation = descriptor.permutator.inverse_transform
         y = inverse_permutation(y_permuted)
-        tresp_charges.append(y)
+        # we provide no estimate for the uncertainty
+        pred = Prediction(y, np.zeros_like(y))
+        tresp_charges.append(pred)
     return tresp_charges
 
 
@@ -264,29 +266,35 @@ class Model_JCTC2023:
         pass
 
     @staticmethod
-    def vac_tresp(mol: "Molecule") -> np.ndarray:  # noqa: F821
+    def vac_tresp(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted vacuum tresp charges"
         coulmat = mol.permuted_coulmat
         encoding = mol.permuted_coulmat_encoding
         return predict_tresp_charges([encoding], [coulmat], [mol.type], [mol.resid])[0]
 
     @staticmethod
-    def vac_tr_dipole(mol: "Molecule") -> np.ndarray:  # noqa: F821
+    def vac_tr_dipole(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted vacuum transition dipole"
-        return get_dipoles([mol.coords], [mol.vac_tresp])[0]
+        value = get_dipoles([mol.coords], [mol.vac_tresp.value])[0]
+        var = np.zeros_like(value)
+        return Prediction(value, var)
 
     @staticmethod
-    def env_tresp(mol: "Molecule") -> np.ndarray:  # noqa: F821
+    def env_tresp(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted polarizable embedding tresp charges"
         scaling = get_rescalings([mol.type], "JCTC2023")[0]
-        return rescale_tresp([mol.vac_tresp], [scaling])[0]
+        value = rescale_tresp([mol.vac_tresp.value], [scaling])[0]
+        var = np.zeros_like(value)
+        return Prediction(value, var)
 
     @staticmethod
-    def env_tr_dipole(mol: "Molecule") -> np.ndarray:  # noqa: F821
-        return get_dipoles([mol.coords], [mol.env_tresp])[0]
+    def env_tr_dipole(mol: "Molecule") -> Prediction:  # noqa: F821
+        value = get_dipoles([mol.coords], [mol.env_tresp.value])[0]
+        var = np.zeros_like(value)
+        return Prediction(value, var)
 
     @staticmethod
-    def vac_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+    def vac_site_energy(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted vacuum site energy"
         params = get_site_model_params(mol.type, kind="vac", model="JCTC2023")
         return predict_site_energies(
@@ -294,7 +302,7 @@ class Model_JCTC2023:
         )
 
     @staticmethod
-    def env_shift_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+    def env_shift_site_energy(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted electrostatic embedding electrochromic shift"
         params = get_site_model_params(mol.type, kind="env", model="JCTC2023")
         encoding = np.column_stack(
@@ -303,24 +311,19 @@ class Model_JCTC2023:
         return predict_site_energies(encoding, mol.type, params, kind="env_shift")
 
     @staticmethod
-    def env_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+    def env_site_energy(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted electrostatic embedding site energy"
-        sites = dict()
-        sites["y_mean"] = (
-            mol.vac_site_energy["y_mean"] + mol.env_shift_site_energy["y_mean"]
-        )
-        sites["y_var"] = (
-            mol.vac_site_energy["y_var"] + mol.env_shift_site_energy["y_var"]
-        )
-        return sites
+        value = mol.vac_site_energy.value + mol.env_shift_site_energy.value
+        var = mol.vac_site_energy.var + mol.env_shift_site_energy.var
+        return Prediction(value, var)
 
     @staticmethod
-    def pol_LR_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+    def pol_LR_site_energy(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted polarizable embedding Linear Response contribution"
         lr, _ = mmpol_site_lr(
             mol.traj,
             coords=mol.coords,
-            charges=mol.env_tresp,
+            charges=mol.env_tresp.value,
             residue_id=mol.resid,
             mask=mol.mask,
             pol_threshold=mol.pol_cutoff,
@@ -332,21 +335,20 @@ class Model_JCTC2023:
         )
         lr = lr.reshape(-1, 1)
         lr /= EV2CM
-        sites = dict(y_mean=lr, y_var=np.zeros_like(lr))
-        return sites
+        var = np.zeros_like(lr)
+        return Prediction(lr, var)
 
     @staticmethod
-    def pol_site_energy(mol: "Molecule") -> Dict[str, np.ndarray]:  # noqa: F821
+    def pol_site_energy(mol: "Molecule") -> Prediction:  # noqa: F821
         "predicted polarizable embedding site energy"
-        sites = dict()
-        sites["y_mean"] = (
-            mol.vac_site_energy["y_mean"]
-            + mol.env_shift_site_energy["y_mean"]
-            + mol.pol_LR_site_energy["y_mean"]
+        value = (
+            mol.vac_site_energy.value
+            + mol.env_shift_site_energy.value
+            + mol.pol_LR_site_energy.value
         )
-        sites["y_var"] = (
-            mol.vac_site_energy["y_var"]
-            + mol.env_shift_site_energy["y_var"]
-            + mol.pol_LR_site_energy["y_var"]
+        var = (
+            mol.vac_site_energy.var
+            + mol.env_shift_site_energy.var
+            + mol.pol_LR_site_energy.var
         )
-        return sites
+        return Prediction(value, var)

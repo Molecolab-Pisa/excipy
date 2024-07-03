@@ -177,60 +177,65 @@ class Molecule:
     # All these properties are implemented using "delegation"
     # i.e. the calculation of each of these properties is
     # delegated to the chosen ML model.
+    #
     # If you require further properties, simply add them, but
     # remember also to add the corresponding method to the Model
     # class for consistency.
     #
+    # Each property must return a prediction for interface
+    # consistency. The prediction has a value and an associated
+    # uncertainty, or variance.
+    #
     @property
     @functools.lru_cache()
-    def vac_tresp(self) -> np.ndarray:
+    def vac_tresp(self) -> "Prediction":  # noqa: F821
         "vacuum tresp charges"
         return self.model.vac_tresp(self)
 
     @property
     @functools.lru_cache()
-    def vac_tr_dipole(self) -> np.ndarray:
+    def vac_tr_dipole(self) -> "Prediction":  # noqa: F821
         "vacuum transition dipole"
         return self.model.vac_tr_dipole(self)
 
     @property
     @functools.lru_cache()
-    def env_tresp(self) -> np.ndarray:
+    def env_tresp(self) -> "Prediction":  # noqa: F821
         "polarizable embedding tresp charges"
         return self.model.env_tresp(self)
 
     @property
     @functools.lru_cache()
-    def env_tr_dipole(self) -> np.ndarray:
+    def env_tr_dipole(self) -> "Prediction":  # noqa: F821
         "polarizable embedding transition dipole"
         return self.model.env_tr_dipole(self)
 
     @property
     @functools.lru_cache()
-    def vac_site_energy(self) -> Dict[str, np.ndarray]:
+    def vac_site_energy(self) -> "Prediction":  # noqa: F821
         "vacuum site energy"
         return self.model.vac_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def env_shift_site_energy(self) -> Dict[str, np.ndarray]:
+    def env_shift_site_energy(self) -> "Prediction":  # noqa: F821
         "environment electrochromic shift"
         return self.model.env_shift_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def env_site_energy(self) -> Dict[str, np.ndarray]:
+    def env_site_energy(self) -> "Prediction":  # noqa: F821
         "environment site energy"
         return self.model.env_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def pol_LR_site_energy(self) -> Dict[str, np.ndarray]:
+    def pol_LR_site_energy(self) -> "Prediction":  # noqa: F821
         "polarizable embedding Linear Response contribution"
         return self.model.pol_LR_site_energy(self)
 
     @property
     @functools.lru_cache()
-    def pol_site_energy(self) -> Dict[str, np.ndarray]:
+    def pol_site_energy(self) -> "Prediction":  # noqa: F821
         "polarizable embedding site energy"
         return self.model.pol_site_energy(self)

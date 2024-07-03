@@ -341,11 +341,19 @@ def compute_couplings(molecules, args):  # noqa: C901
     # Predict tresp charges
     print_action("Predicting vacuum TrEsp charges")
     vac_tresp = [mol.vac_tresp for mol in molecules]
-    save_tresp_charges(vac_tresp, args.residue_ids, kind="vac", outfile=args.outfile)
+    for p, m in zip(vac_tresp, molecules):
+        save_tresp_charges(
+            p.value,
+            p.var,
+            m.resid,
+            kind="vac",
+            outfile=args.outfile,
+        )
 
     # Predicted vacuum transition dipoles
     vac_tr_dipoles = [mol.vac_tr_dipole for mol in molecules]
-    save_dipoles(vac_tr_dipoles, args.residue_ids, kind="vac", outfile=args.outfile)
+    for p, m in zip(vac_tr_dipoles, molecules):
+        save_dipoles(p.value, p.var, m.resid, kind="vac", outfile=args.outfile)
 
     # Do not compute couplings if there is only one molecule
     if n_molecules < 2:
@@ -355,8 +363,9 @@ def compute_couplings(molecules, args):  # noqa: C901
         # Compute the couplings using the predicted TrEsp charges
         coords = [mol.coords for mol in molecules]
 
+        vac_tresp_val = [p.value for p in vac_tresp]
         predicted_couplings, pairs_ids = compute_coulomb_couplings(
-            coords, vac_tresp, args.residue_ids, args.cutoff, args.coup_list
+            coords, vac_tresp_val, args.residue_ids, args.cutoff, args.coup_list
         )
 
         print_predicted_couplings(predicted_couplings, pairs_ids, kind="V_vac")
@@ -371,11 +380,25 @@ def compute_couplings(molecules, args):  # noqa: C901
     # Predict TrEsp charges in polarizable environment
     print_action("Rescaling TrEsp and Coulomb couplings")
     env_tresp = [mol.env_tresp for mol in molecules]
-    save_tresp_charges(env_tresp, args.residue_ids, kind="env", outfile=args.outfile)
+    for p, m in zip(env_tresp, molecules):
+        save_tresp_charges(
+            p.value,
+            p.var,
+            m.resid,
+            kind="env",
+            outfile=args.outfile,
+        )
 
     # Predict transition dipoles in polarizable environment
     env_tr_dipoles = [mol.env_tr_dipole for mol in molecules]
-    save_dipoles(env_tr_dipoles, args.residue_ids, kind="env", outfile=args.outfile)
+    for p, m in zip(env_tr_dipoles, molecules):
+        save_dipoles(
+            p.value,
+            p.var,
+            m.resid,
+            kind="env",
+            outfile=args.outfile,
+        )
 
     # Do not compute couplings if there is only one molecule
     if len(coords) < 2:
@@ -411,9 +434,10 @@ def compute_couplings(molecules, args):  # noqa: C901
             # update the coup list to contain only the residues
             above_threshold_coup_list = ["_".join(p) for p in above_threshold_pairs_ids]
 
+            env_tresp_val = [p.value for p in env_tresp]
             env_couplings, _ = compute_coulomb_couplings(
                 coords,
-                env_tresp,
+                env_tresp_val,
                 args.residue_ids,
                 args.cutoff,
                 above_threshold_coup_list,
@@ -450,7 +474,7 @@ def compute_couplings(molecules, args):  # noqa: C901
             mmpol_couplings, _ = batch_mmpol_coup_lr(
                 molecules[0].traj,  # not nice but ok
                 coords=coords,
-                charges=env_tresp,
+                charges=env_tresp_val,
                 residue_ids=args.residue_ids,
                 masks=masks,
                 pairs=above_threshold_pairs_idx,
@@ -490,35 +514,31 @@ def compute_couplings(molecules, args):  # noqa: C901
 def _compute_vac_site_energies(molecules, args):
     """
     Compute the site energies in vacuum along a trajectory.
-    Arguments
-    ---------
-    coords    : list of ndarray, (num_frames, num_atoms, 3)
-                Coordinates of the chromophores
-    atnums    : list of ndarray, (num_atoms,)
-                Atomic numbers of the chromophores
-    types     : list of str
-                Types of the chromophores
-    args      : argparse.Namespace
-                CLI arguments
+
+    Parameters
+    ----------
+    molecules: list of Molecule
+        molecule instances
+    args: argparse.Namespace
+        CLI arguments
+
     Returns
     -------
-    encodings : list of ndarray, (num_frames, num_features)
-                Encodings of the internal geometry
-    sites_vac : dict or defaultdict
-                Site energies in vacuum
-                Dictionary with keys "y_mean" and "y_var", each of which
-                is a list of ndarrays (one for each chromophore).
+    sites_vac: dict
+        site energies in vacuum
+        dictionary with keys "y_mean" and "y_var", each of which
+        is a list of ndarrays (one for each chromophore).
     """
     sites_vac = defaultdict(list)
 
     for mol in molecules:
         site_vac = mol.vac_site_energy
-        sites_vac["y_mean"].append(site_vac["y_mean"])
-        sites_vac["y_var"].append(site_vac["y_var"])
+        sites_vac["y_mean"].append(site_vac.value)
+        sites_vac["y_var"].append(site_vac.var)
         # Save the site energy
         save_site_energies(
-            site_vac["y_mean"],
-            site_vac["y_var"],
+            site_vac.value,
+            site_vac.var,
             mol.resid,
             kind="vac",
             outfile=args.outfile,
@@ -528,34 +548,29 @@ def _compute_vac_site_energies(molecules, args):
 
 def _compute_env_site_shift(molecules, args):
     """
-    Arguments
-    ---------
-    traj       : pytraj.Trajectory
-                 Trajectory object.
-    masks      : list of str
-                 Masks of the chromophores
-    internal_encodings : list of ndarray, (num_frames, num_features)
-                         Encodings of the internal geometry
-    types      : list of str
-                 Types of the chromophores
-    args       : argparse.Namespace
-                 CLI arguments
+    Parameters
+    ----------
+    molecules: list of Molecule
+        molecule instances
+    args: argparse.Namespace
+        CLI arguments
+
     Returns
     -------
-    site_site_shifts : dict or defaultdict
-                       MMPol contributions to the site energy
-                       Dictionary with keys "y_mean" and "y_var", each of which
-                       is a list of ndarrays (one for each chromophore).
+    site_env_shifts: dict
+        electrochromic shift of the site energy
+        dictionary with keys "y_mean" and "y_var", each of which
+        is a list of ndarrays (one for each chromophore).
     """
     sites_env_shift = defaultdict(list)
 
     for mol in molecules:
         site_env_shift = mol.env_shift_site_energy
-        sites_env_shift["y_mean"].append(site_env_shift["y_mean"])
-        sites_env_shift["y_var"].append(site_env_shift["y_var"])
+        sites_env_shift["y_mean"].append(site_env_shift.value)
+        sites_env_shift["y_var"].append(site_env_shift.var)
         save_site_energies(
-            site_env_shift["y_mean"],
-            site_env_shift["y_var"],
+            site_env_shift.value,
+            site_env_shift.var,
             mol.resid,
             kind="env_shift",
             outfile=args.outfile,
@@ -565,33 +580,28 @@ def _compute_env_site_shift(molecules, args):
 
 def _compute_env_site_energies(molecules, args):
     """
-    Sum the @VAC, @ENV contributions to the site energies to obtain the total
-    site energy in a non-polarizable environment.
-    Arguments
-    ---------
-    sites_vac       : dict or defaultdict
-                      Vacuum site energies.
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
-    sites_env_shift : dict or defaultdict
-                      Environment site energies shifts
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
+    Parameters
+    ----------
+    molecules: list of Molecule
+        molecule instances
+    args: argparse.Namespace
+        CLI arguments
+
     Returns
     -------
-    sites_mmp       : dict or defaultdict
-                      Site energies in a polarizable environment
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
+    site_env: dict
+        site energy in environment
+        dictionary with keys "y_mean" and "y_var", each of which
+        is a list of ndarrays (one for each chromophore).
     """
     sites_env = defaultdict(list)
     for mol in molecules:
         site_env = mol.env_site_energy
-        sites_env["y_mean"].append(site_env["y_mean"])
-        sites_env["y_var"].append(site_env["y_var"])
+        sites_env["y_mean"].append(site_env.value)
+        sites_env["y_var"].append(site_env.var)
         save_site_energies(
-            site_env["y_mean"],
-            site_env["y_var"],
+            site_env.value,
+            site_env.var,
             mol.resid,
             kind="env",
             outfile=args.outfile,
@@ -605,35 +615,28 @@ def _compute_env_site_energies(molecules, args):
 
 def _compute_mmp_site_shift(molecules, args):
     """
-    Arguments
-    ---------
-    traj       : pytraj.Trajectory
-                 Trajectory object.
-    coords     : list of ndarray, (num_frames, num_atoms, 3)
-                 Coordinates of the chromophores
-    masks      : list of str
-                 Masks of the chromophores
-    types      : list of str
-                 Types of the chromophores
-    args       : argparse.Namespace
-                 CLI arguments
-    charges    : list of ndarray, (num_frames, num_atoms)
-                 list of charges of the chromophores
+    Parameters
+    ----------
+    molecules: list of Molecule
+        molecule instances
+    args: argparse.Namespace
+        CLI arguments
+
     Returns
     -------
-    mmp_site_shifts : dict or defaultdict
-                      MMPol contributions to the site energy
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
+    mmp_site_shifts: dict
+        linear response contribution of the site energy in a polarizable env.
+        dictionary with keys "y_mean" and "y_var", each of which
+        is a list of ndarrays (one for each chromophore).
     """
     mmp_site_shifts = defaultdict(list)
     for mol in molecules:
         site = mol.pol_LR_site_energy
-        mmp_site_shifts["y_mean"].append(site["y_mean"])
-        mmp_site_shifts["y_var"].append(site["y_var"])
+        mmp_site_shifts["y_mean"].append(site.value)
+        mmp_site_shifts["y_var"].append(site.var)
         save_site_energies(
-            site["y_mean"],
-            site["y_var"],
+            site.value,
+            site.var,
             mol.resid,
             kind="env_pol_shift",
             outfile=args.outfile,
@@ -647,37 +650,28 @@ def _compute_mmp_site_shift(molecules, args):
 
 def _compute_mmp_site_energies(molecules, args):
     """
-    Sum the @VAC, @ENV, @POL contributions to the site energies to obtain the total
-    site energy in a polarizable environment.
-    Arguments
-    ---------
-    sites_vac       : dict or defaultdict
-                      Vacuum site energies.
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
-    sites_env_shift : dict or defaultdict
-                      Environment site energies shifts
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
-    sites_mmp_shift : dict or defaultdict
-                      Polarizable site energies shifts
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
+    Parameters
+    ----------
+    molecules: list of Molecule
+        molecule instances
+    args: argparse.Namespace
+        CLI arguments
+
     Returns
     -------
-    sites_mmp       : dict or defaultdict
-                      Site energies in a polarizable environment
-                      Dictionary with keys "y_mean" and "y_var", each of which
-                      is a list of ndarrays (one for each chromophore).
+    mmp_site_shifts: dict
+        site energies in a polarizable environment
+        dictionary with keys "y_mean" and "y_var", each of which
+        is a list of ndarrays (one for each chromophore).
     """
     sites_mmp = defaultdict(list)
     for mol in molecules:
         site = mol.pol_site_energy
-        sites_mmp["y_mean"].append(site["y_mean"])
-        sites_mmp["y_var"].append(site["y_var"])
+        sites_mmp["y_mean"].append(site.value)
+        sites_mmp["y_var"].append(site.var)
         save_site_energies(
-            site["y_mean"],
-            site["y_var"],
+            site.value,
+            site.var,
             mol.resid,
             kind="env_pol",
             outfile=args.outfile,
@@ -694,10 +688,10 @@ def compute_site_energies(molecules, args):
     Predict site energies along a trajectory
     Arguments
     ---------
-    traj    : pytraj.Trajectory
-              Trajectory object.
-    args    : argparse.Namespace
-              CLI arguments.
+    molecules: list of Molecule
+        molecule instances
+    args: argparse.Namespace
+        CLI arguments.
     """
     print_section("SITE ENERGIES @VAC")
     print_action("Encoding Geometries and Predicting Sites")

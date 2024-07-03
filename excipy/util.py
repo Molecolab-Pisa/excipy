@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import NamedTuple
+
 import os
 from collections import defaultdict
 from functools import partial
@@ -61,6 +64,12 @@ atomsym2atomnum = {
 
 
 atomnum2atomsym = {value: key for key, value in atomsym2atomnum.items()}
+
+
+class Prediction(NamedTuple):
+    "class used to store a generic prediction: value and variance/uncertainty"
+    value: np.ndarray
+    var: np.ndarray
 
 
 # =============================================================================
@@ -200,50 +209,6 @@ def save_atom_numbers(atnums, residue_ids, outfile):
             hf[group].create_dataset(r, data=a)
 
 
-def save_tresp_charges(charges, residue_ids, kind, outfile):
-    """
-    Save the point charges to an existing HDF5 file.
-    Arguments
-    ---------
-    charges     : list of ndarray, (num_samples, num_atoms)
-                Point charges
-    residue_ids : list of str
-                Residue IDs
-    kind        : str
-                Kind of point charges (e.g., vac, env, env_pol)
-    outfile     : str
-                Filename
-    """
-    group = f"tresp/{kind}"
-    with h5py.File(outfile, "a") as hf:
-        if group not in hf.keys():
-            hf.create_group(group)
-        for r, c in zip(residue_ids, charges):
-            hf[group].create_dataset(r, data=c)
-
-
-def save_dipoles(dipoles, residue_ids, kind, outfile):
-    """
-    Save the dipoles to an existing HDF5 file.
-    Arguments
-    ---------
-    dipoles     : list of ndarray, (num_samples, 3)
-                Dipoles
-    residue_ids : list of str
-                Residue IDs
-    kind        : str
-                Kind of point charges (e.g., vac, env, env_pol)
-    outfile     : str
-                Filename
-    """
-    group = f"trdipole/{kind}"
-    with h5py.File(outfile, "a") as hf:
-        if group not in hf.keys():
-            hf.create_group(group)
-        for r, d in zip(residue_ids, dipoles):
-            hf[group].create_dataset(r, data=d)
-
-
 def save_coulomb_couplings(couplings, pairs_ids, kind, outfile):
     """
     Save the Coulomb couplings to an existing HDF5 file.
@@ -267,28 +232,41 @@ def save_coulomb_couplings(couplings, pairs_ids, kind, outfile):
             hf[group].create_dataset(p, data=c)
 
 
-def save_site_energies(mean_energies, var_energies, residue_id, kind, outfile):
+def save_prediction(value, var, residue_id, kind, outfile, name):
     """
-    Save the site energies to an existing HDF5 file.
+    Save a prediction to an existing HDF5 file.
     Arguments
     ---------
-    mean_energies : list of ndarray, (num_samples,)
-                  Site energies (mean value)
-    var_energies  : list of ndarray, (num_samples,)
-                  Site energies (variance)
-    residue_id    : str
-                  Residue ID
-    kind          : str
-                  Kind of site energy (e.g., vac, env, env_pol)
-    outfile       : str
-                  Filename
+    value: np.ndarray
+        predicted value
+    var: np.ndarray
+        predicted variance/uncertainty
+    residue_id: str
+        Residue ID
+    kind: str
+        Kind of environment (e.g., vac, env, env_pol)
+    outfile: str
+        Filename
+    name: str
+        property name
     """
     with h5py.File(outfile, "a") as hf:
-        group = f"siten/{kind}/{residue_id}"
-        if group not in hf:
-            hf.create_group(group)
-        hf[group].create_dataset("mean", data=mean_energies)
-        hf[group].create_dataset("var", data=var_energies)
+        group = f"{name}/{kind}/{residue_id}"
+        hf.require_group(group)
+        hf[group].create_dataset("value", data=value)
+        hf[group].create_dataset("var", data=var)
+
+
+def save_tresp_charges(value, var, residue_id, kind, outfile):
+    return save_prediction(value, var, residue_id, kind, outfile, name="tresp")
+
+
+def save_dipoles(value, var, residue_id, kind, outfile):
+    return save_prediction(value, var, residue_id, kind, outfile, name="trdip")
+
+
+def save_site_energies(value, var, residue_id, kind, outfile):
+    return save_prediction(value, var, residue_id, kind, outfile, name="siten")
 
 
 # =============================================================================
@@ -374,61 +352,6 @@ def load_atom_numbers(outfile):
     return atnums
 
 
-def load_tresp_charges(outfile, kind, frames=None):
-    """
-    Load the point charges from a HDF5 file.
-    Arguments
-    ---------
-    outfile   : str
-              Filename
-    kind      : str
-              Kind of charges to load
-              (e.g., vac, env, env_pol)
-    frames    : None or ndarray
-              Frames to load
-    Returns
-    -------
-    tresp     : dict
-              Dictionary with residue ID (key) and charges (value)
-    """
-    tresp = dict()
-    group = f"tresp/{kind}"
-    with h5py.File(outfile, "r") as hf:
-        for resid in hf[group].keys():
-            tresp[resid] = np.asarray(hf[group].get(resid))
-            if frames is not None:
-                tresp[resid] = tresp[resid][frames]
-    return tresp
-
-
-def load_dipoles(outfile, kind, frames=None):
-    """
-    Load the transition dipoles from a HDF5 file.
-    Transition dipoles are in AU.
-    Arguments
-    ---------
-    outfile   : str
-              Filename
-    kind      : str
-              Kind of dipoles to load
-              (e.g., vac, env, env_pol)
-    frames    : None or ndarray
-              Frames to load
-    Returns
-    -------
-    dipoles   : dict
-              Dictionary with residue ID (key) and dipoles (value)
-    """
-    dipoles = dict()
-    group = f"trdipole/{kind}"
-    with h5py.File(outfile, "r") as hf:
-        for resid in hf[group].keys():
-            dipoles[resid] = np.asarray(hf[group].get(resid))
-            if frames is not None:
-                dipoles[resid] = dipoles[resid][frames]
-    return dipoles
-
-
 def load_couplings(outfile, kind, units="cm_1", frames=None):
     """
     Load the couplings from a HDF5 file.
@@ -465,25 +388,29 @@ def load_couplings(outfile, kind, units="cm_1", frames=None):
     return coups
 
 
-def load_site_energies(outfile, kind, units="cm_1", frames=None):
-    """
-    Load the site energies from a HDF5 file.
-    Arguments
-    ---------
-    outfile   : str
-              Filename
-    kind      : str
-              Kind of site energies to load
-              (e.g., vac, env, env_pol)
-    units     : str
-              Units (cm_1 or eV)
-    frames    : None or ndarray
-              Frames to load
-    Returns
-    -------
-    sites     : dict
-              Dictionary with residue ID (key) and site energy (value)
-    """
+def _legacy_load_tresp_charges(outfile, kind, frames=None):
+    tresp = dict()
+    group = f"tresp/{kind}"
+    with h5py.File(outfile, "r") as hf:
+        for resid in hf[group].keys():
+            tresp[resid] = np.asarray(hf[group].get(resid))
+            if frames is not None:
+                tresp[resid] = tresp[resid][frames]
+    return tresp
+
+
+def _legacy_load_dipoles(outfile, kind, frames=None):
+    dipoles = dict()
+    group = f"trdipole/{kind}"
+    with h5py.File(outfile, "r") as hf:
+        for resid in hf[group].keys():
+            dipoles[resid] = np.asarray(hf[group].get(resid))
+            if frames is not None:
+                dipoles[resid] = dipoles[resid][frames]
+    return dipoles
+
+
+def _legacy_load_site_energies(outfile, kind, units="cm_1", frames=None):
     sites = defaultdict(dict)
     group = f"siten/{kind}"
     with h5py.File(outfile, "r") as hf:
@@ -502,6 +429,144 @@ def load_site_energies(outfile, kind, units="cm_1", frames=None):
             else:
                 raise RuntimeError(f"Units={units} not recognized.")
     return sites
+
+
+def load_prediction(outfile, kind, name, units="cm_1", frames=None, flatten=False):
+    """Loads a generic prediction
+
+    Parameters
+    ----------
+    outfile: str
+        name of the output file
+    kind: str
+        environment kind (e.g. vac, env, ...)
+    name: str
+        property name (e.g. siten, trdip, ...)
+    units: str
+        units
+    frames: np.ndarray
+        subset of frames to load
+    flatten: bool
+        whether to flatten the prediction
+
+    Returns
+    -------
+    pred: dict of Prediction
+        dictionary of Prediction instances for each residue
+    """
+    pred = dict()
+    group = f"{name}/{kind}"
+    with h5py.File(outfile, "r") as hf:
+        for resid in hf[group].keys():
+            subgroup = group + "/" + resid
+            value = np.asarray(hf[subgroup].get("value"))
+            var = np.asarray(hf[subgroup].get("var"))
+            if flatten:
+                value = value.reshape(-1)
+                var = var.reshape(-1)
+            if frames is not None:
+                value = value[frames]
+                var = var[frames]
+            if units == "eV":
+                pass
+            elif units == "cm_1":
+                value *= EV2CM
+                var *= EV2CM**2
+            else:
+                raise RuntimeError(f"Units={units} not recognized.")
+            pred[resid] = Prediction(value, var)
+    return pred
+
+
+# make it possible to load legacy outputs if wanted, at least for now.
+
+
+def load_site_energies(outfile, kind, units="cm_1", frames=None, legacy=False):
+    """Loads the site energies
+
+    Parameters
+    ----------
+    outfile: str
+        name of the output file
+    kind: str
+        environment kind (e.g. vac, env, ...)
+    units: str
+        units
+    frames: np.ndarray
+        subset of frames to load
+    legacy: bool
+        if True, tries to load the output file written using the old
+        excipy format.
+
+    Returns
+    -------
+    pred: dict of Prediction
+        dictionary of Prediction instances for each residue
+    """
+    if legacy:
+        return _legacy_load_site_energies(outfile, kind, units, frames)
+    else:
+        return load_prediction(
+            outfile, kind, name="siten", units=units, frames=frames, flatten=True
+        )
+
+
+def load_tresp_charges(outfile, kind, frames=None, legacy=False):
+    """Loads the tresp charges
+
+    Parameters
+    ----------
+    outfile: str
+        name of the output file
+    kind: str
+        environment kind (e.g. vac, env, ...)
+    frames: np.ndarray
+        subset of frames to load
+    legacy: bool
+        if True, tries to load the output file written using the old
+        excipy format.
+
+    Returns
+    -------
+    pred: dict of Prediction
+        dictionary of Prediction instances for each residue
+    """
+    if legacy:
+        return _legacy_load_tresp_charges(outfile, kind, frames)
+    else:
+        # eV here means do nothing
+        return load_prediction(
+            outfile, kind, name="tresp", units="eV", frames=frames, flatten=False
+        )
+
+
+def load_dipoles(outfile, kind, frames=None, legacy=False):
+    """Loads the transition dipoles
+
+    Parameters
+    ----------
+    outfile: str
+        name of the output file
+    kind: str
+        environment kind (e.g. vac, env, ...)
+    frames: np.ndarray
+        subset of frames to load
+    legacy: bool
+        if True, tries to load the output file written using the old
+        excipy format.
+
+    Returns
+    -------
+    pred: dict of Prediction
+        dictionary of Prediction instances for each residue
+    """
+    if legacy:
+        return _legacy_load_tresp_charges(outfile, kind, frames)
+    else:
+        # eV here means do nothing
+        return load_prediction(
+            outfile, kind, name="trdip", units="eV", frames=frames, flatten=False
+        )
 
 
 # =============================================================================
@@ -639,6 +704,7 @@ def _load_exat_quantities(
     coups_kind="vac",
     dipoles_kind="vac",
     ene_units="cm_1",
+    legacy=False,
 ):
     """
     Load quantities necessary to construct an exat.ExcSystem from an excipy HDF5 output file.
@@ -675,12 +741,21 @@ def _load_exat_quantities(
     # Total number of atoms for each chromophore
     natoms = {k: len(v) for k, v in atnums.items()}
     # Site energies (cm^-1)
-    sites = load_site_energies(infile, kind=sites_kind, units=ene_units, frames=frames)
-    sites = {k: v["mean"] for k, v in sites.items()}
+    sites = load_site_energies(
+        infile, kind=sites_kind, units=ene_units, frames=frames, legacy=legacy
+    )
+    if legacy:
+        sites = {k: v["mean"] for k, v in sites.items()}
+    else:
+        sites = {k: v.value for k, v in sites.items()}
     # Couplings (cm^-1)
     coups = load_couplings(infile, kind=coups_kind, units=ene_units, frames=frames)
     # Transition Dipoles
-    dipoles = load_dipoles(infile, kind=dipoles_kind, frames=frames)
+    dipoles = load_dipoles(infile, kind=dipoles_kind, frames=frames, legacy=legacy)
+    if legacy:
+        pass
+    else:
+        dipoles = {k: v.value for k, v in dipoles.items()}
     return dict(
         ChromList=chromlist,
         xyz=coords,
@@ -700,6 +775,7 @@ def load_as_exat(
     coups_kind="vac",
     dipoles_kind="vac",
     ene_units="cm_1",
+    legacy=False,
 ):
     """
     Load the excipy output in a format that can be employed easily to construct
@@ -736,6 +812,7 @@ def load_as_exat(
         coups_kind=coups_kind,
         dipoles_kind=dipoles_kind,
         ene_units=ene_units,
+        legacy=legacy,
     )
     residue_ids = list(eq["ChromList"].keys())
     n_frames = len(eq["xyz"][residue_ids[0]])
