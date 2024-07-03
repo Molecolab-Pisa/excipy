@@ -1,3 +1,7 @@
+<div align="center">
+<img src="images/logo.svg" alt="logo"></img>
+</div>
+
 
 # excipy
 
