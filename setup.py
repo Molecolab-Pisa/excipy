@@ -24,15 +24,17 @@ ext_modules += cythonize(
 package_data = {
     "excipy": [
         "database/atom_names/*.json",
-        "database/parameters/*.json",
-        "database/rescalings/*.json",
-        "database/models/*/*.npz",
+        "database/parameters/*/*.json",
+        "database/rescalings/*/*.json",
+        "database/models/*/*/*.npz",
     ]
 }
 
 
 packages = [
     "excipy",
+    "excipy.clib",
+    "excipy.models",
 ]
 
 

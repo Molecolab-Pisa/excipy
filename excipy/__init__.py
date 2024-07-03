@@ -9,6 +9,7 @@ from . import descriptors
 from . import regression
 from . import trajectory
 from . import util
+from . import models
 
 # Cython functions
 from . import clib
