@@ -408,16 +408,17 @@ def compute_couplings(molecules, args):  # noqa: C901
                     (args.residue_ids.index(p[0]), args.residue_ids.index(p[1]))
                 )
 
-            env_scalings = [mol.tresp_pol_scaling for mol in molecules]
+            # update the coup list to contain only the residues
+            above_threshold_coup_list = ["_".join(p) for p in above_threshold_pairs_ids]
 
-            coup_scalings = [
-                env_scalings[idx[0]] * env_scalings[idx[1]]
-                for idx in above_threshold_pairs_idx
-            ]
-
-            env_couplings = np.asarray(
-                [c * s for c, s in zip(above_threshold_couplings, coup_scalings)]
+            env_couplings, _ = compute_coulomb_couplings(
+                coords,
+                pol_tresp,
+                args.residue_ids,
+                args.cutoff,
+                above_threshold_coup_list,
             )
+
             print_predicted_couplings(
                 env_couplings, above_threshold_pairs_ids, kind="V_env"
             )

@@ -6,7 +6,6 @@ from .database import (
     get_atom_names,
     get_identical_atoms,
     select_masks,
-    get_rescalings,
     get_hydrogens,
 )
 from .trajectory import parse_masks
@@ -39,8 +38,6 @@ class Molecule:
         self.permute_groups = get_identical_atoms([self.type])[0]
         # amber mask
         self.mask = select_masks([self.resid], [self.atom_names])[0]
-        # tresp rescaling from vac to pol
-        self.tresp_pol_scaling = get_rescalings([self.type])[0]
         # hydrogen atoms
         self.hydrogen_atoms = get_hydrogens([self.type])[0]
         # atom names without hydrogens

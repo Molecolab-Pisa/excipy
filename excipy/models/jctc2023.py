@@ -12,7 +12,7 @@ from ..regression import (
     LinearRidgeRegression,
 )
 from ..polar import mmpol_site_lr
-from ..database import get_site_model_params
+from ..database import get_site_model_params, get_rescalings
 from ..util import EV2CM, rescale_tresp, pbar
 
 # Implementation of the available models
@@ -240,7 +240,8 @@ class Model_JCTC2023:
 
     @staticmethod
     def pol_tresp(mol):
-        return rescale_tresp([mol.vac_tresp], [mol.tresp_pol_scaling])[0]
+        scaling = get_rescalings([mol.type], "JCTC2023")[0]
+        return rescale_tresp([mol.vac_tresp], [scaling])[0]
 
     @staticmethod
     def vac_site_energy(mol):
@@ -255,7 +256,9 @@ class Model_JCTC2023:
         encoding = np.column_stack(
             [mol.coulmat_noh_encoding, mol.elec_potential_encoding]
         )
-        return predict_site_energies(encoding, mol.type, params, mol.resid, kind="env")
+        return predict_site_energies(
+            encoding, mol.type, params, mol.resid, kind="env_shift"
+        )
 
     @staticmethod
     def env_site_energy(mol):
