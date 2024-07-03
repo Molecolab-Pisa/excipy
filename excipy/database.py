@@ -60,18 +60,14 @@ def atom_names_in_database(type):
     return os.path.isfile(path)
 
 
-def params_in_database(type):
-    path = os.path.join(database_paths.params, type + ".json")
+def params_in_database(type, model):
+    path = os.path.join(database_paths.params, model, type + ".json")
     return os.path.isfile(path)
 
 
-def rescalings_in_database(type):
-    path = os.path.join(database_paths.rescalings, type + ".json")
+def rescalings_in_database(type, model):
+    path = os.path.join(database_paths.rescalings, model, type + ".json")
     return os.path.isfile(path)
-
-
-def type_in_database(type):
-    return atom_names_in_database(type) and params_in_database(type)
 
 
 # =============================================================================
@@ -209,15 +205,17 @@ def get_identical_atoms(type, convert_to_indeces=True):
         return _get_identical_atoms(type, convert_to_indeces=convert_to_indeces)
 
 
-def _get_params(type):
-    if params_in_database(type):
-        path = os.path.join(database_paths.params, type + ".json")
+def _get_params(type, model):
+    if params_in_database(type, model):
+        path = os.path.join(database_paths.params, model, type + ".json")
         return load_json(path)
     else:
-        raise DatabaseError(f"params not present in database for molecule type {type}.")
+        raise DatabaseError(
+            f"params not present in database for molecule type {type}, model {model}"
+        )
 
 
-def get_params(type):
+def get_params(type, model):
     """
     Load the regression parameters from the database.
     Arguments
@@ -226,30 +224,30 @@ def get_params(type):
             molecule type(s)
     """
     if isinstance(type, Iterable) and not isinstance(type, str):
-        return [_get_params(t) for t in type]
+        return [_get_params(t, model) for t in type]
     else:
-        return _get_params(type)
+        return _get_params(type, model)
 
 
-def _get_rescalings(type):
-    if rescalings_in_database(type):
-        path = os.path.join(database_paths.rescalings, type + ".json")
+def _get_rescalings(type, model):
+    if rescalings_in_database(type, model):
+        path = os.path.join(database_paths.rescalings, model, type + ".json")
         return load_json(path)["mean"]
     else:
         raise DatabaseError(
-            f"rescalings not present in database for molecule type {type}."
+            f"rescalings not present in database for molecule type {type}, model {model}."
         )
 
 
-def get_rescalings(type):
+def get_rescalings(type, model):
     """
     Load the rescaling parameters for (vacuum TrEsp
     to environment TrEsp) from the database.
     """
     if isinstance(type, Iterable) and not isinstance(type, str):
-        return [_get_rescalings(t) for t in type]
+        return [_get_rescalings(t, model) for t in type]
     else:
-        return _get_rescalings(type)
+        return _get_rescalings(type, model)
 
 
 def get_site_model_params(type, kind, model):
@@ -285,15 +283,15 @@ def set_atom_names(type, names, force_overwrite=False):
     dump_json(path, names)
 
 
-def set_params(type, params, force_overwrite=False):
-    if params_in_database(type):
+def set_params(type, model, params, force_overwrite=False):
+    if params_in_database(type, model):
         if force_overwrite:
             pass
         else:
             raise DatabaseError(
-                f"params for molecule type {type} already present and `force_overwrite` is False."
+                f"params for molecule type {type}, model {model} already present and `force_overwrite` is False."
             )
-    path = os.path.join(database_paths.params, type + ".json")
+    path = os.path.join(database_paths.params, model, type + ".json")
     dump_json(path, params)
 
 

@@ -1,11 +1,10 @@
-from functools import partial
-from collections import defaultdict
+from __future__ import annotations
+
 from collections.abc import Iterable
 import numpy as np
 import scipy.linalg as scipy_la
 
-from .database import type_in_database, get_params, DatabaseError
-from .util import pbar
+from .database import get_params, DatabaseError, params_in_database
 from .selection import squared_distances
 
 # ===================================================================
@@ -145,195 +144,6 @@ def predict_gp(x, x_train, kernel, mu, coefs, sigma, cache_key=None):
     return mean, variance
 
 
-#
-# Site energy prediction in vacuum and environment
-#
-
-
-def predict_site_energies_chlorophyll_vac(encoding, model_params, residue_id, chl):
-    # define a kernel functions that takes x and x_train only
-    kernel_func = partial(
-        matern52_kernel,
-        lengthscale=model_params["lengthscale"],
-        variance=model_params["variance"],
-    )
-
-    # define the key for caching the cholesky decomposition of k_train
-    cache_key = (chl.upper(), "VAC")
-
-    # mean and variance from gaussian process
-    mean, variance = predict_gp(
-        encoding,
-        x_train=model_params["x_train"],
-        kernel=kernel_func,
-        mu=model_params["mu"],
-        coefs=model_params["coefs"],
-        sigma=model_params["sigma"],
-        cache_key=cache_key,
-    )
-
-    return mean, variance
-
-
-def predict_site_energies_chlorophyll_env_shift(
-    encoding, model_params, residue_id, chl
-):
-    # define a kernel function that takes x and x_train only
-    kernel_func = partial(
-        m52cm_linpot_kernel,
-        variance_lin=model_params["variance_lin"],
-        variance_m52=model_params["variance_m52"],
-        lengthscale_m52=model_params["lengthscale_m52"],
-        cm_dims=model_params["cm_dims"],
-        pot_dims=model_params["pot_dims"],
-    )
-
-    # define the key for caching the cholesky decomposition of k_train
-    cache_key = (chl.upper(), "ENV")
-
-    # mean and variance from gaussian process
-    mean, variance = predict_gp(
-        encoding,
-        x_train=model_params["x_train"],
-        kernel=kernel_func,
-        mu=model_params["mu"],
-        coefs=model_params["coefs"],
-        sigma=model_params["sigma"],
-        cache_key=cache_key,
-    )
-
-    return mean, variance
-
-
-# specialize for chl a and b and bcl
-# vac
-predict_site_energies_cla_vac = partial(
-    predict_site_energies_chlorophyll_vac,
-    chl="CLA",
-)
-predict_site_energies_chl_vac = partial(
-    predict_site_energies_chlorophyll_vac,
-    chl="CHL",
-)
-predict_site_energies_bcl_vac = partial(
-    predict_site_energies_chlorophyll_vac,
-    chl="BLC",
-)
-# env shift
-predict_site_energies_cla_env_shift = partial(
-    predict_site_energies_chlorophyll_env_shift,
-    chl="CLA",
-)
-predict_site_energies_chl_env_shift = partial(
-    predict_site_energies_chlorophyll_env_shift,
-    chl="CHL",
-)
-predict_site_energies_bcl_env_shift = partial(
-    predict_site_energies_chlorophyll_env_shift,
-    chl="BCL",
-)
-
-_PREDICT_SITE_ENERGIES_FUNCS = {
-    ("CLA", "VAC"): predict_site_energies_cla_vac,
-    ("CHL", "VAC"): predict_site_energies_chl_vac,
-    ("BCL", "VAC"): predict_site_energies_bcl_vac,
-    ("CLA", "ENV"): predict_site_energies_cla_env_shift,
-    ("CHL", "ENV"): predict_site_energies_chl_env_shift,
-    ("BCL", "ENV"): predict_site_energies_bcl_env_shift,
-}
-
-#
-# wrapper
-#
-
-
-def predict_site_energies(encoding, type, model_params, residue_id, kind):
-    """
-    Predict the site energy of each molecule with Gaussian Process Regression.
-    Arguments
-    ---------
-    encodings   : list of ndarray, (num_samples, num_features)
-                Molecule encodings
-    types       : list of str
-                List of molecule types (used to fetch the model)
-    residue_ids : list of str
-                List of Residue IDs
-    kind        : str
-                Kind of site energy to predict (vac, env)
-    Returns
-    -------
-    site energies : defaultdict
-                  Dictionary with mean and variance of each
-                  prediction.
-    """
-
-    iterator = pbar(
-        encoding,
-        total=encoding.shape[0],
-        desc=": Predicting siten",
-        ncols=79,
-    )
-
-    siten = defaultdict(list)
-
-    func = _PREDICT_SITE_ENERGIES_FUNCS[(type.upper(), kind.upper())]
-
-    for x in iterator:
-        # shape (1, n_features)
-        x = np.atleast_2d(x)
-
-        mean, variance = func(x, model_params, residue_id)
-
-        siten["y_mean"].append(mean)
-        siten["y_var"].append(variance)
-
-    for key in siten.keys():
-        siten[key] = np.concatenate(siten[key], axis=0)
-
-    return siten
-
-
-def predict_tresp_charges(encodings, descriptors, types, residue_ids):
-    """
-    Predict the TrEsp charges of each molecule.
-    Arguments
-    ---------
-    encodings    : list of ndarray, (num_samples, num_features)
-                 Molecule encodings
-    descriptors  : list of objects
-                 Descriptors
-    types        : list of str
-                 List of molecule types
-    residue_ids  : list of str
-                 List of Residue IDs
-    Returns
-    -------
-    tresp_charges : list of ndarray, (num_samples, num_atoms)
-                  Predicted TrEsp charges
-    """
-    iterator = pbar(
-        zip(encodings, descriptors, types, residue_ids),
-        total=len(encodings),
-        desc=": Predicting TrEsp",
-        ncols=79,
-    )
-    tresp_charges = []
-    for encoding, descriptor, type, residue_id in iterator:
-        iterator.set_postfix(residue_id=f"{residue_id}")
-        # Instantiate a regressor
-        # The alpha parameter here is unimportant, as the regression
-        # parameters are loaded from the database
-        ridge = LinearRidgeRegression()
-        ridge.load_params(type)
-        # Note that the predicted charges have to be permuted
-        # again in order to match the correct atom ordering
-        y_permuted = ridge.predict(encoding)
-        inverse_permutation = descriptor.permutator.inverse_transform
-        y = inverse_permutation(y_permuted)
-        tresp_charges.append(y)
-    return tresp_charges
-
-
 class LinearRidgeRegression(object):
     """
     Linear Ridge Regression
@@ -401,13 +211,13 @@ class LinearRidgeRegression(object):
             "w": self.w_.tolist(),
         }
 
-    def load_params(self, type):
+    def load_params(self, type, model):
         """
         Load the parameters for a molecule of type
         `type` from the database.
         """
-        if type_in_database(type):
-            params = get_params(type)
+        if params_in_database(type, model):
+            params = get_params(type, model)
             for key, val in params.items():
                 params[key] = np.asarray(val)
             self.w_ = params["w"]

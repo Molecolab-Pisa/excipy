@@ -1,142 +1,17 @@
 from __future__ import annotations
 import functools
 
-import numpy as np
-
-from .util import read_molecule_types, get_dipoles, rescale_tresp
-from .util import EV2CM
+from .util import read_molecule_types, get_dipoles
 from .database import (
     get_atom_names,
     get_identical_atoms,
     select_masks,
     get_rescalings,
     get_hydrogens,
-    get_site_model_params,
 )
 from .trajectory import parse_masks
 from .descriptors import get_coulomb_matrix, encode_geometry, get_MM_elec_potential
-from .regression import predict_tresp_charges, predict_site_energies
-from .polar import mmpol_site_lr
-
-
-# Implementation of the available models
-#
-# Each model is a collection of functions that takes as input a molecule
-# object (see below). Each function uses properties of the molecule
-# object with no checks on whether these properties are there (mixin).
-# If you add more models, use the same pattern, and if you want to use a
-# property that the Molecule object does not posses, implement that property.
-# If all models are coherent, then in the CLI we can be agnostic about what
-# they really do.
-#
-# In theory, each model should implement the following predictions:
-#
-# * vacuum tresp
-# * electrostatic-embedding tresp (not present here)
-# * polarizable-embedding tresp
-# * vacuum site energy
-# * environment shift
-# * environment site energy
-# * polarizable LR contribution
-# * polarizable site energy
-#
-
-
-class Model_JCTC2023:
-    """The same type of model published in
-
-    [1] Cignoni, Edoardo, Lorenzo Cupellini, and Benedetta Mennucci.
-        Journal of Chemical Theory and Computation 19.3 (2023).
-    [2] Cignoni, Edoardo, Lorenzo Cupellini, and Benedetta Mennucci.
-        Journal of Physics: Condensed Matter 34.30 (2022).
-
-    OK for Chlorophyll a, b, and Bacteriochloropyhll a.
-    """
-
-    def __init__(self):
-        pass
-
-    @staticmethod
-    def vac_tresp(mol):
-        coulmat = mol.permuted_coulmat
-        encoding = mol.permuted_coulmat_encoding
-        return predict_tresp_charges([encoding], [coulmat], [mol.type], [mol.resid])[0]
-
-    @staticmethod
-    def pol_tresp(mol):
-        return rescale_tresp([mol.vac_tresp], [mol.tresp_pol_scaling])[0]
-
-    @staticmethod
-    def vac_site_energy(mol):
-        params = get_site_model_params(mol.type, kind="vac", model="JCTC2023")
-        return predict_site_energies(
-            mol.coulmat_noh_encoding, mol.type, params, mol.resid, kind="vac"
-        )
-
-    @staticmethod
-    def env_shift_site_energy(mol):
-        params = get_site_model_params(mol.type, kind="env", model="JCTC2023")
-        encoding = np.column_stack(
-            [mol.coulmat_noh_encoding, mol.elec_potential_encoding]
-        )
-        return predict_site_energies(encoding, mol.type, params, mol.resid, kind="env")
-
-    @staticmethod
-    def env_site_energy(mol):
-        sites = dict()
-        sites["y_mean"] = (
-            mol.vac_site_energy["y_mean"] + mol.env_shift_site_energy["y_mean"]
-        )
-        sites["y_var"] = (
-            mol.vac_site_energy["y_var"] + mol.env_shift_site_energy["y_var"]
-        )
-        return sites
-
-    @staticmethod
-    def pol_LR_site_energy(mol):
-        lr, _ = mmpol_site_lr(
-            mol.traj,
-            coords=mol.coords,
-            charges=mol.pol_tresp,
-            residue_id=mol.resid,
-            mask=mol.mask,
-            pol_threshold=mol.pol_cutoff,
-            db=mol.charges_db,
-            mol2=mol.template_mol2,
-            cut_strategy="spherical",
-            smear_link=True,
-            turnoff_mask=mol.turnoff_mask,
-        )
-        lr = lr.reshape(-1, 1)
-        lr /= EV2CM
-        sites = dict(y_mean=lr, y_var=np.zeros_like(lr))
-        return sites
-
-    @staticmethod
-    def pol_site_energy(mol):
-        sites = dict()
-        sites["y_mean"] = (
-            mol.vac_site_energy["y_mean"]
-            + mol.env_shift_site_energy["y_mean"]
-            + mol.pol_LR_site_energy["y_mean"]
-        )
-        sites["y_var"] = (
-            mol.vac_site_energy["y_var"]
-            + mol.env_shift_site_energy["y_var"]
-            + mol.pol_LR_site_energy["y_var"]
-        )
-        return sites
-
-
-# List of the available models per molecule type
-
-available_models = {
-    "CLA": {"JCTC2023": Model_JCTC2023()},
-    "CHL": {"JCTC2023": Model_JCTC2023()},
-    # the JCTC2023 model for BCL is called like this because it
-    # has the same structure, just different parameters.
-    "BCL": {"JCTC2023": Model_JCTC2023()},
-}
+from .models import available_models
 
 
 class Molecule:
