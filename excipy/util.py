@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import NamedTuple
+import warnings
 
 import os
 from collections import defaultdict
@@ -388,7 +389,16 @@ def load_couplings(outfile, kind, units="cm_1", frames=None):
     return coups
 
 
+def _deprecated_legacy_loading():
+    msg = (
+        "Loading data in legacy format is deprecated."
+        " Its support will de dropped in future releases."
+    )
+    warnings.warn(msg, stacklevel=2)
+
+
 def _legacy_load_tresp_charges(outfile, kind, frames=None):
+    _deprecated_legacy_loading()
     tresp = dict()
     group = f"tresp/{kind}"
     with h5py.File(outfile, "r") as hf:
@@ -400,6 +410,7 @@ def _legacy_load_tresp_charges(outfile, kind, frames=None):
 
 
 def _legacy_load_dipoles(outfile, kind, frames=None):
+    _deprecated_legacy_loading()
     dipoles = dict()
     group = f"trdipole/{kind}"
     with h5py.File(outfile, "r") as hf:
@@ -411,6 +422,7 @@ def _legacy_load_dipoles(outfile, kind, frames=None):
 
 
 def _legacy_load_site_energies(outfile, kind, units="cm_1", frames=None):
+    _deprecated_legacy_loading()
     sites = defaultdict(dict)
     group = f"siten/{kind}"
     with h5py.File(outfile, "r") as hf:
