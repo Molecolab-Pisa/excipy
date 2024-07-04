@@ -17,6 +17,7 @@ ext_modules += cythonize(
         "excipy.clib.retain_full_residues",
         ["excipy/cython/retain_full_residues.pyx"],
         include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
     )
 )
 
