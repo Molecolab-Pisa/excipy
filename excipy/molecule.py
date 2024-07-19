@@ -20,6 +20,50 @@ from .descriptors import (
 from .models import available_models
 
 
+def cached_with_checked_dependency(*dependencies):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            func_key = getattr(self, "_{:s}_cache_key".format(func.__name__), None)
+            # cache not set (first call)
+            if func_key is None:
+                res = func(self, *args, **kwargs)
+                new_key = [
+                    getattr(self, "_{:s}_cache_key".format(dep)) for dep in dependencies
+                ]
+                setattr(self, "_{:s}_cache_key".format(func.__name__), new_key)
+                setattr(self, "_{:s}".format(func.__name__), res)
+                return res
+            else:
+                # check if function key matches with dependencies keys
+                same_key = True
+                for dep, subkey in zip(dependencies, func_key):  # need to check lengths
+                    dep_key = getattr(self, "_{:s}_cache_key".format(dep), None)
+                    # we are using lists, so == checks for equality of
+                    # all elements (works with keys that are themselves lists)
+                    check = dep_key == subkey
+                    if not check:
+                        same_key = False
+                # no match, recompute and update cache key
+                if not same_key:
+                    res = func(self, *args, **kwargs)
+                    new_key = [
+                        getattr(self, "_{:s}_cache_key".format(dep))
+                        for dep in dependencies
+                    ]
+                    setattr(self, "_{:s}_cache_key".format(func.__name__), new_key)
+                    setattr(self, "_{:s}".format(func.__name__), res)
+                    return res
+                # match, return existing attribute
+                else:
+                    return getattr(self, "_{:s}".format(func.__name__))
+            return res
+
+        return wrapper
+
+    return decorator
+
+
 class Molecule:
     def __init__(
         self,
@@ -59,25 +103,8 @@ class Molecule:
         """
         self.traj = traj
         self.resid = str(resid)
-        # residue type (CLA, CHL, ...)
-        self.type = read_molecule_types(self.traj.top, [self.resid])[0]
         # get model
         self.model = self.get_model(model_dict)
-        # load atom names from database
-        self.atom_names = get_atom_names([self.type])[0]
-        self.n_atoms = len(self.atom_names)
-        # groups of identical atoms
-        self.permute_groups = get_identical_atoms([self.type])[0]
-        # amber mask
-        self.mask = select_masks([self.resid], [self.atom_names])[0]
-        # hydrogen atoms
-        self.hydrogen_atoms = get_hydrogens([self.type])[0]
-        # atom names without hydrogens
-        self.atom_names_noh = get_atom_names(
-            [self.type], exclude_atoms=[self.hydrogen_atoms]
-        )[0]
-        # mask without hydrogens
-        self.mask_noh = select_masks([self.resid], [self.atom_names_noh])[0]
         # electrostatics cutoff
         self.elec_cutoff = elec_cutoff
         # polarization cutoff
@@ -88,6 +115,114 @@ class Molecule:
         self.charges_db = charges_db
         # tempalte mol2 (e.g. to recognize terminal residues)
         self.template_mol2 = template_mol2
+
+    @property
+    def traj(self):
+        return self._traj
+
+    @traj.setter
+    def traj(self, v):
+        self._traj_cache_key = str(id(v))
+        self._traj = v
+
+    @property
+    def resid(self):
+        return self._resid
+
+    @resid.setter
+    def resid(self, v):
+        self._resid_cache_key = str(v)
+        self._resid = str(v)
+
+    @property
+    def model(self):
+        return self._model
+
+    @model.setter
+    def model(self, v):
+        self._model_cache_key = str(id(v))
+        self._model = v
+
+    @property
+    def elec_cutoff(self):
+        return self._elec_cutoff
+
+    @elec_cutoff.setter
+    def elec_cutoff(self, v):
+        self._elec_cutoff_cache_key = str(v)
+        self._elec_cutoff = v
+
+    @property
+    def pol_cutoff(self):
+        return self._pol_cutoff
+
+    @pol_cutoff.setter
+    def pol_cutoff(self, v):
+        self._pol_cutoff_cache_key = str(v)
+        self._pol_cutoff = v
+
+    @property
+    def turnoff_mask(self):
+        return self._turnoff_mask
+
+    @turnoff_mask.setter
+    def turnoff_mask(self, v):
+        self._turnoff_mask_cache_key = str(v)
+        self._turnoff_mask = v
+
+    @property
+    def charges_db(self):
+        return self._charges_db
+
+    @charges_db.setter
+    def charges_db(self, v):
+        self._charges_db_cache_key = str(v)
+        self._charges_db = v
+
+    @property
+    def template_mol2(self):
+        return self._template_mol2
+
+    @template_mol2.setter
+    def template_mol2(self, v):
+        self._template_mol2_cache_key = str(v)
+        self._template_mol2 = v
+
+    #
+    # Derived/read-only properties
+    #
+
+    @property
+    def type(self):
+        return read_molecule_types(self.traj.top, [self.resid])[0]
+
+    @property
+    def atom_names(self):
+        return get_atom_names([self.type])[0]
+
+    @property
+    def n_atoms(self):
+        return len(self.atom_names)
+
+    @property
+    def permute_groups(self):
+        return get_identical_atoms([self.type])[0]
+
+    @property
+    def mask(self):
+        return select_masks([self.resid], [self.atom_names])[0]
+
+    @property
+    def hydrogen_atoms(self):
+        return get_hydrogens([self.type])[0]
+
+    @property
+    def atom_names_noh(self):
+        return get_atom_names([self.type], exclude_atoms=[self.hydrogen_atoms])[0]
+
+    @property
+    def mask_noh(self):
+        return select_masks([self.resid], [self.atom_names_noh])[0]
 
     def get_model(self, model_dict: Dict[str, str]) -> "Model":  # noqa: F821
         try:
@@ -102,7 +237,7 @@ class Molecule:
     # used by the ML models to compute the various quantities of interest
     #
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid")
     def coords(self) -> np.ndarray:
         "molecular coordinates"
         coords, atnums = parse_masks(self.traj, [self.mask], [self.atom_names])
@@ -110,7 +245,7 @@ class Molecule:
         return coords[0]
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid")
     def coords_noh(self) -> np.ndarray:
         "molecular coordinates with no hydrogens"
         coords, atnums = parse_masks(self.traj, [self.mask_noh], [self.atom_names_noh])
@@ -118,7 +253,7 @@ class Molecule:
         return coords[0]
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid")
     def permuted_coulmat(self) -> "CoulombMatrix":  # noqa: F821
         "permuted (for identical atoms only) coulomb matrix"
         coulmat = get_coulomb_matrix(
@@ -130,13 +265,13 @@ class Molecule:
         return coulmat
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid")
     def permuted_coulmat_encoding(self) -> np.ndarray:
         "permuted (for identical atoms only) coulomb matrix encoding"
         return encode_geometry([self.permuted_coulmat], free_attr=["coords"])[0]
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid")
     def coulmat_noh(self) -> "CoulombMatrix":  # noqa: F821
         "coulomb matrix (offdiagonal) with no hydrogens"
         coulmat = get_coulomb_matrix(
@@ -148,13 +283,15 @@ class Molecule:
         return coulmat
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid")
     def coulmat_noh_encoding(self) -> np.ndarray:
         "coulomb matrix (offdiagonal) with no hydrogens encoding"
         return encode_geometry([self.coulmat_noh], free_attr=["coords"])[0]
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj", "resid", "elec_cutoff", "turnoff_mask", "charges_db", "template_mol2"
+    )
     def elec_potential(self) -> "MMElectrostaticPotential":  # noqa: F821
         "electrostatic potential on QM (or ML) atoms"
         return get_MM_elec_potential(
@@ -168,7 +305,9 @@ class Molecule:
         )[0]
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj", "resid", "elec_cutoff", "turnoff_mask", "charges_db", "template_mol2"
+    )
     def elec_potential_encoding(self) -> np.ndarray:
         "electrostatic potential on QM (or ML) atoms encoding"
         return encode_geometry([self.elec_potential])[0]
@@ -187,55 +326,109 @@ class Molecule:
     # uncertainty, or variance.
     #
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid", "model")
     def vac_tresp(self) -> "Prediction":  # noqa: F821
         "vacuum tresp charges"
         return self.model.vac_tresp(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid", "model")
     def vac_tr_dipole(self) -> "Prediction":  # noqa: F821
         "vacuum transition dipole"
         return self.model.vac_tr_dipole(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj",
+        "resid",
+        "model",
+        "elec_cutoff",
+        "turnoff_mask",
+        "charges_db",
+        "template_mol2",
+        "pol_cutoff",
+    )
     def env_tresp(self) -> "Prediction":  # noqa: F821
         "polarizable embedding tresp charges"
         return self.model.env_tresp(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj",
+        "resid",
+        "model",
+        "elec_cutoff",
+        "turnoff_mask",
+        "charges_db",
+        "template_mol2",
+        "pol_cutoff",
+    )
     def env_tr_dipole(self) -> "Prediction":  # noqa: F821
         "polarizable embedding transition dipole"
         return self.model.env_tr_dipole(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency("traj", "resid", "model")
     def vac_site_energy(self) -> "Prediction":  # noqa: F821
         "vacuum site energy"
         return self.model.vac_site_energy(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj",
+        "resid",
+        "model",
+        "elec_cutoff",
+        "turnoff_mask",
+        "charges_db",
+        "template_mol2",
+        "pol_cutoff",
+    )
     def env_shift_site_energy(self) -> "Prediction":  # noqa: F821
         "environment electrochromic shift"
         return self.model.env_shift_site_energy(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj",
+        "resid",
+        "model",
+        "elec_cutoff",
+        "turnoff_mask",
+        "charges_db",
+        "template_mol2",
+        "pol_cutoff",
+    )
     def env_site_energy(self) -> "Prediction":  # noqa: F821
         "environment site energy"
         return self.model.env_site_energy(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj",
+        "resid",
+        "model",
+        "elec_cutoff",
+        "turnoff_mask",
+        "charges_db",
+        "template_mol2",
+        "pol_cutoff",
+    )
     def pol_LR_site_energy(self) -> "Prediction":  # noqa: F821
         "polarizable embedding Linear Response contribution"
         return self.model.pol_LR_site_energy(self)
 
     @property
-    @functools.lru_cache()
+    @cached_with_checked_dependency(
+        "traj",
+        "resid",
+        "model",
+        "elec_cutoff",
+        "turnoff_mask",
+        "charges_db",
+        "template_mol2",
+        "pol_cutoff",
+    )
     def pol_site_energy(self) -> "Prediction":  # noqa: F821
         "polarizable embedding site energy"
         return self.model.pol_site_energy(self)
