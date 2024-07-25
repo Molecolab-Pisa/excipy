@@ -156,7 +156,7 @@ def get_bond_matrix(coords, top, masks):
 
 
 def _get_MM_elec_potential(
-    traj, mask, cutoff, frames, turnoff_mask, charges_db, remove_mean
+    traj, mask, cutoff, frames, turnoff_mask, charges_db, remove_mean, read_alphas
 ):
     """
     Get the MM electrostatic potential acting on a single molecule.
@@ -185,11 +185,12 @@ def _get_MM_elec_potential(
         turnoff_mask=turnoff_mask,
         charges_db=charges_db,
         remove_mean=remove_mean,
+        read_alphas=read_alphas,
     )
 
 
 def get_MM_elec_potential(
-    traj, masks, cutoff, frames, turnoff_mask, charges_db, remove_mean
+    traj, masks, cutoff, frames, turnoff_mask, charges_db, remove_mean, read_alphas
 ):
     """
     Get the MM electrostatic potential acting on one or more molecules.
@@ -219,6 +220,7 @@ def get_MM_elec_potential(
             turnoff_mask=turnoff_mask,
             charges_db=charges_db,
             remove_mean=remove_mean,
+            read_alphas=read_alphas,
         )
         for m in masks
     ]
@@ -615,6 +617,7 @@ class MMElectrostaticPotential(object):
         turnoff_mask=None,
         charges_db=None,
         remove_mean=False,
+        read_alphas=True,
     ):
         """
         Arguments
@@ -651,6 +654,7 @@ class MMElectrostaticPotential(object):
         self.frames = frames
         self.charges_db = charges_db
         self.remove_mean = remove_mean
+        self.read_alphas = read_alphas
 
     def electrostatic_potential(
         self,
@@ -710,6 +714,7 @@ class MMElectrostaticPotential(object):
             db=self.charges_db,
             mol2=None,
             warn=False,
+            read_alphas=self.read_alphas,
         )
         return charges[indices]
 

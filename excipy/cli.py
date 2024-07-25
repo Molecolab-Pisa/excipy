@@ -195,6 +195,13 @@ def cli_parse(argv):
         help="Output file (HDF5).",
     )
 
+    opt(
+        "--charges_db",
+        required=False,
+        default=None,
+        help="database file containing static and pol charges and polarizabilities",
+    )
+
     args = parser.parse_args(argv[1:])
     return args, parser
 
@@ -479,7 +486,7 @@ def compute_couplings(molecules, args):  # noqa: C901
                 masks=masks,
                 pairs=above_threshold_pairs_idx,
                 pol_threshold=args.pol_cutoff,
-                db=None,
+                db=args.charges_db,
                 mol2=None,
                 cut_strategy="spherical",
                 smear_link=True,
@@ -946,6 +953,13 @@ def main():
     traj = pt.iterload(args.coordinates, top=args.parameters, frame_slice=frame_slice)
     save_n_frames(traj.n_frames, args.outfile)
 
+    # Decide whether to read the polarizabilities
+
+    if args.no_coup:
+        read_alphas = not args.no_site_pol
+    else:
+        read_alphas = not (args.no_site_pol and args.no_coup_pol)
+
     # Define molecules
     molecules = [
         Molecule(
@@ -955,8 +969,9 @@ def main():
             elec_cutoff=30.0,
             pol_cutoff=args.pol_cutoff,
             turnoff_mask=args.turnoff_mask,
-            charges_db=None,
+            charges_db=args.charges_db,
             template_mol2=None,
+            read_alphas=read_alphas,
         )
         for resid in args.residue_ids
     ]  # TODO: add possibility to provide charges_db and template_mol2

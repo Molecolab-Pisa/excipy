@@ -75,6 +75,7 @@ class Molecule:
         turnoff_mask: str = None,
         charges_db: str = None,
         template_mol2: str = None,
+        read_alphas: bool = True,
     ) -> None:
         """
         Parameters
@@ -115,6 +116,8 @@ class Molecule:
         self.charges_db = charges_db
         # tempalte mol2 (e.g. to recognize terminal residues)
         self.template_mol2 = template_mol2
+        # read_alphas
+        self.read_alphas = read_alphas
 
     @property
     def traj(self):
@@ -187,6 +190,15 @@ class Molecule:
     def template_mol2(self, v):
         self._template_mol2_cache_key = str(v)
         self._template_mol2 = v
+
+    @property
+    def read_alphas(self):
+        return self._read_alphas
+
+    @read_alphas.setter
+    def read_alphas(self, v):
+        self._read_alphas_cache_key = str(v)
+        self._read_alphas = v
 
     #
     # Derived/read-only properties
@@ -294,7 +306,13 @@ class Molecule:
 
     @property
     @cached_with_checked_dependency(
-        "traj", "resid", "elec_cutoff", "turnoff_mask", "charges_db", "template_mol2"
+        "traj",
+        "resid",
+        "elec_cutoff",
+        "turnoff_mask",
+        "charges_db",
+        "template_mol2",
+        "read_alphas",
     )
     def elec_potential(self) -> "MMElectrostaticPotential":  # noqa: F821
         "electrostatic potential on QM (or ML) atoms"
@@ -306,6 +324,7 @@ class Molecule:
             turnoff_mask=self.turnoff_mask,
             charges_db=self.charges_db,
             remove_mean=False,
+            read_alphas=self.read_alphas,
         )[0]
 
     @property
@@ -351,6 +370,7 @@ class Molecule:
         "charges_db",
         "template_mol2",
         "pol_cutoff",
+        "read_alphas",
     )
     def env_tresp(self) -> "Prediction":  # noqa: F821
         "polarizable embedding tresp charges"
@@ -366,6 +386,7 @@ class Molecule:
         "charges_db",
         "template_mol2",
         "pol_cutoff",
+        "read_alphas",
     )
     def env_tr_dipole(self) -> "Prediction":  # noqa: F821
         "polarizable embedding transition dipole"
@@ -387,6 +408,7 @@ class Molecule:
         "charges_db",
         "template_mol2",
         "pol_cutoff",
+        "read_alphas",
     )
     def env_shift_site_energy(self) -> "Prediction":  # noqa: F821
         "environment electrochromic shift"
@@ -402,6 +424,7 @@ class Molecule:
         "charges_db",
         "template_mol2",
         "pol_cutoff",
+        "read_alphas",
     )
     def env_site_energy(self) -> "Prediction":  # noqa: F821
         "environment site energy"

@@ -206,7 +206,11 @@ def link_atom_smear(
 
 
 def read_electrostatics(
-    top: pt.Topology, db: str = None, mol2: str = None, warn: bool = True
+    top: pt.Topology,
+    db: str = None,
+    mol2: str = None,
+    warn: bool = True,
+    read_alphas: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """reads the electrostatic parameters
 
@@ -244,7 +248,9 @@ def read_electrostatics(
                 " charges found in the topology. Maybe they are not compatible with"
                 " polarizabilities. Using WangAL polarizabilities."
             )
-        charges, pol_charges, alphas = _read_electrostatics_from_top(top=top)
+        charges, pol_charges, alphas = _read_electrostatics_from_top(
+            top=top, read_alphas=read_alphas
+        )
 
     elif db_available and not mol2_available:
         if warn:
@@ -253,11 +259,15 @@ def read_electrostatics(
                 " I may not be able to recognize terminal residues."
                 " If this is a concern, please provide a mol2 template."
             )
-        charges, pol_charges, alphas = _read_electrostatics_from_db(top=top, db=db)
+        charges, pol_charges, alphas = _read_electrostatics_from_db(
+            top=top, db=db, read_alphas=read_alphas
+        )
 
     elif db_available and mol2_available:
         mol2_top = pt.load_topology(mol2)
-        charges, pol_charges, alphas = _read_electrostatics_from_db(top=mol2_top, db=db)
+        charges, pol_charges, alphas = _read_electrostatics_from_db(
+            top=mol2_top, db=db, read_alphas=read_alphas
+        )
 
     else:
         raise RuntimeError()
@@ -266,7 +276,7 @@ def read_electrostatics(
 
 
 def _read_electrostatics_from_top(
-    top: pt.Topology,
+    top: pt.Topology, read_alphas: bool
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """reads the electrostatic quantities from a pytraj topology
 
@@ -285,12 +295,19 @@ def _read_electrostatics_from_top(
     """
     charges = np.array([atom.charge for atom in top.atoms])
     pol_charges = charges.copy()
-    alphas = compute_polarizabilities(top)
+
+    if not read_alphas:
+        alphas = None
+    else:
+        alphas = compute_polarizabilities(top)
+
     return charges, pol_charges, alphas
 
 
 def _read_electrostatics_from_db(
-    top: pt.Topology, db: str
+    top: pt.Topology,
+    db: str,
+    read_alphas: bool,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """reads the electrostatics quantities from a database file
 
@@ -325,7 +342,11 @@ def _read_electrostatics_from_db(
             idx = np.where(resatname == pattern)[0][0]
             charge = float(db_charges[idx])
             pol_charge = float(db_pol_charges[idx])
-            alpha = float(db_alphas[idx])
+
+            if not read_alphas:
+                alpha = None
+            else:
+                alpha = float(db_alphas[idx])
         except IndexError:
             try:
                 altname = _find_alternative_name(res, name)
@@ -336,7 +357,12 @@ def _read_electrostatics_from_db(
                 idx = np.where(resatname == pattern)[0][0]
                 charge = float(db_charges[idx])
                 pol_charge = float(db_pol_charges[idx])
-                alpha = float(db_alphas[idx])
+
+                if not read_alphas:
+                    alpha = None
+                else:
+                    alpha = float(db_alphas[idx])
+
             except IndexError:
                 msg = f"Charge for {res} {name} not found."
                 raise IndexError(msg)
