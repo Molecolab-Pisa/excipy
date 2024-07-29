@@ -111,6 +111,44 @@ def get_atom_names(type, exclude_atoms=None):
             atom_names = np.asarray([n for n in atom_names if n not in exclude_atoms])
 
 
+def _get_atomic_numbers(type):
+    if atom_names_in_database(type):
+        path = os.path.join(database_paths.atom_names, type + ".json")
+        return np.asarray(load_json(path)["atomic_numbers"]).astype(int)
+    else:
+        raise DatabaseError(
+            f"atomic numbers not present in database for molecule type {type}."
+        )
+
+
+def get_atomic_numbers(type, exclude_atoms=None):
+    """
+    Load the atomic numbers from the database
+    Arguments
+    ---------
+    type    : str or list of str
+            molecule type(s)
+    """
+    if isinstance(type, Iterable) and not isinstance(type, str):
+        atomic_numbers = np.asarray([_get_atomic_numbers(t) for t in type])
+        if exclude_atoms is None:
+            return atomic_numbers.astype(int)
+        else:
+            atomic_numbers = [
+                np.asarray([n for n in names if n not in excluded])
+                for names, excluded in zip(atomic_numbers, exclude_atoms)
+            ]
+        return atomic_numbers.astype(int)
+    else:
+        atomic_numbers = _get_atomic_numbers(type)
+        if exclude_atoms is None:
+            return atomic_numbers
+        else:
+            atomic_numbers = np.asarray(
+                [n for n in atomic_numbers if n not in exclude_atoms]
+            ).astype(int)
+
+
 def _get_hydrogens(type):
     if atom_names_in_database(type):
         path = os.path.join(database_paths.atom_names, type + ".json")

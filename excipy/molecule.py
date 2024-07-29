@@ -240,7 +240,9 @@ class Molecule:
     @cached_with_checked_dependency("traj", "resid")
     def coords(self) -> np.ndarray:
         "molecular coordinates"
-        coords, atnums = parse_masks(self.traj, [self.mask], [self.atom_names])
+        coords, atnums = parse_masks(
+            self.traj, [self.mask], [self.atom_names], [self.type]
+        )
         self.atnums = atnums[0]
         return coords[0]
 
@@ -248,7 +250,9 @@ class Molecule:
     @cached_with_checked_dependency("traj", "resid")
     def coords_noh(self) -> np.ndarray:
         "molecular coordinates with no hydrogens"
-        coords, atnums = parse_masks(self.traj, [self.mask_noh], [self.atom_names_noh])
+        coords, atnums = parse_masks(
+            self.traj, [self.mask_noh], [self.atom_names_noh], [self.type]
+        )
         self.atnums_noh = atnums[0]
         return coords[0]
 

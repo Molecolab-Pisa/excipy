@@ -2,6 +2,7 @@ from collections.abc import Iterable
 import numpy as np
 import pytraj as pt
 from .util import pbar
+from .database import get_atomic_numbers
 
 
 def iterxyz(traj, mask):
@@ -30,7 +31,7 @@ def iterxyz(traj, mask):
     return np.asarray([frame.xyz.copy() for frame in iterator])
 
 
-def parse_ensure_order(traj, mask, top, names):
+def parse_ensure_order(traj, mask, top, names, typ):
     """
     Collect atomic coordinates and atomic numbers for atoms selected by an AMBER
     mask.
@@ -56,7 +57,7 @@ def parse_ensure_order(traj, mask, top, names):
     # and the corresponding cartesian coordinates and atomic
     # numbers
     traj_atom_names = np.asarray([a.name for a in top[mask]])
-    traj_atom_numbs = np.asarray([a.atomic_number for a in top[mask]])
+    traj_atom_numbs = get_atomic_numbers(typ)
     traj_xyz = iterxyz(traj, mask)
     # Empty containers for cartesian coordinates and atomic numbers
     xyz = np.zeros(traj_xyz.shape)
@@ -103,7 +104,7 @@ def _validate_atom_names(arg):
         )
 
 
-def parse_masks(traj, masks, atom_names):
+def parse_masks(traj, masks, atom_names, types):
     """
     Parse the AMBER masks, collecting coordinates and atomic numbers
     with the same atomic order as specified by atom_names.
@@ -132,9 +133,9 @@ def parse_masks(traj, masks, atom_names):
 
     coords = []
     atnums = []
-    iterator = zip(masks, atom_names)
-    for mask, names in iterator:
-        xyz, z = parse_ensure_order(traj, mask, traj.top, names)
+    iterator = zip(masks, atom_names, types)
+    for mask, names, typ in iterator:
+        xyz, z = parse_ensure_order(traj, mask, traj.top, names, typ)
         coords.append(xyz)
         atnums.append(z)
     return coords, atnums
