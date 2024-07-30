@@ -208,6 +208,13 @@ def cli_parse(argv):
         help="Absolute path to a custom database folder.",
     )
 
+    opt(
+        "--charges_db",
+        required=False,
+        default=None,
+        help="database file containing static and pol charges and polarizabilities",
+    )
+
     outfiles = parser.add_argument_group("output files")
     opt = outfiles.add_argument
 
@@ -216,13 +223,6 @@ def cli_parse(argv):
         required=False,
         default="out.h5",
         help="Output file (HDF5).",
-    )
-
-    opt(
-        "--charges_db",
-        required=False,
-        default=None,
-        help="database file containing static and pol charges and polarizabilities",
     )
 
     args = parser.parse_args(argv[1:])
