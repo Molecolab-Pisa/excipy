@@ -423,7 +423,7 @@ def compute_couplings(molecules, args):  # noqa: C901
         )
 
     # Do not compute couplings if there is only one molecule
-    if len(coords) < 2:
+    if n_molecules < 2:
         pass
     else:
         # If no coupling has been computed, there's nothing to rescale
@@ -477,7 +477,7 @@ def compute_couplings(molecules, args):  # noqa: C901
     # We compute the MMPol contribution to each coupling
     # if we can make use of the polarization module
     if excipy.available_polarizable_module and not args.no_coup_pol:
-        if len(coords) < 2:
+        if n_molecules < 2:
             pass
         # We compute this coupling only if we have
         # computed some couplings before
