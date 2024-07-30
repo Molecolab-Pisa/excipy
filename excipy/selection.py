@@ -341,11 +341,12 @@ def spherical_cutoff(
               and the source atoms
     """
     ext_idx = np.arange(ext_coords.shape[0])
-    dist = cdist(ext_coords, source_coords)
+    cut_mask = cut_box(source_coords, ext_coords, cutoff)
+    dist = cdist(ext_coords[cut_mask], source_coords)
     min_dist = np.min(dist, axis=1)
     ext_mask = min_dist <= cutoff
-    ext_idx = ext_idx[ext_mask]
-    ext_coords = ext_coords[ext_mask]
+    ext_idx = ext_idx[cut_mask][ext_mask]
+    ext_coords = ext_coords[cut_mask][ext_mask]
     dist = dist[ext_mask]
     num_ext = ext_idx.shape[0]
     return num_ext, ext_coords, ext_idx, dist
