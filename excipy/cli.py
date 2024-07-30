@@ -165,6 +165,14 @@ def cli_parse(argv):
     )
 
     opt(
+        "--elec_cutoff",
+        required=False,
+        default=30.0,
+        type=float,
+        help="Cutoff for electrostatics in Angstrom.",
+    )
+
+    opt(
         "--no_coup_pol",
         required=False,
         action="store_true",
@@ -980,7 +988,7 @@ def main():
             traj=traj,
             resid=resid,
             model_dict=models,
-            elec_cutoff=30.0,
+            elec_cutoff=args.elec_cutoff,
             pol_cutoff=args.pol_cutoff,
             turnoff_mask=args.turnoff_mask,
             charges_db=args.charges_db,
