@@ -21,6 +21,15 @@ ext_modules += cythonize(
     )
 )
 
+ext_modules += cythonize(
+    Extension(
+        "excipy.clib.distances_diffmask",
+        ["excipy/cython/distances_diffmask.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
+    )
+)
+
 
 package_data = {
     "excipy": [

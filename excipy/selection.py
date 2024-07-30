@@ -21,6 +21,7 @@ import numpy as np
 from scipy.spatial.distance import cdist
 
 from .clib.retain_full_residues import retain_full_residues_cy
+from .clib.distances_diffmask import distances_diffmask_cy
 from .util import pbar
 
 
@@ -255,7 +256,8 @@ def whole_residues_cutoff(
     ).astype(bool)
     # reuse the already-computed distances and just fill with the
     # missing values
-    dist = _distances_diffmask(
+    # dist = _distances_diffmask(
+    dist = distances_diffmask_cy(
         source_coords=source_coords,
         ext_coords=ext_coords,
         dist1=dist,
@@ -271,6 +273,9 @@ def whole_residues_cutoff(
     return num_ext, ext_coords, ext_idx, dist
 
 
+# Edo: this function here works but is deprecated in favor of the faster
+#      cython function distances_diffmask_cy in excipy.clib. Leaving this
+#      here for debugging purposes only.
 def _distances_diffmask(
     source_coords: np.ndarray,
     ext_coords: np.ndarray,

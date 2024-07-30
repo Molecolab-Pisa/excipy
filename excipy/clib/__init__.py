@@ -14,3 +14,4 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from .retain_full_residues import retain_full_residues_cy
+from .distances_diffmask import distances_diffmask_cy
