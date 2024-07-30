@@ -30,6 +30,15 @@ ext_modules += cythonize(
     )
 )
 
+ext_modules += cythonize(
+    Extension(
+        "excipy.clib.map_polarizable_atoms",
+        ["excipy/cython/map_polarizable_atoms.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
+    )
+)
+
 
 package_data = {
     "excipy": [

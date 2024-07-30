@@ -35,6 +35,7 @@ from .elec import (
     electric_field,
 )
 from .selection import spherical_cutoff, whole_residues_cutoff, get_residues_array
+from .clib.map_polarizable_atoms import map_polarizable_atoms_cy
 
 Trajectory = Union[pt.Trajectory, pt.TrajectoryIterator]
 
@@ -81,6 +82,7 @@ def _angstrom2bohr(*arrays):
 # =============================================================================
 
 
+# Edo: do not use, use the cython version
 def _map_polarizable_atoms(cut_mask, count_as="fortran"):
     """
     Builds a map from an array of the indices of all atoms
@@ -109,7 +111,7 @@ def _build_pol_neighbor_list(full_connect, cut_mask):
     Build the polarizable neighbor list needed to compute the exclusion
     list in the Fortran routine.
     """
-    pol_map, num_pol_atoms, pol_idx = _map_polarizable_atoms(
+    pol_map, num_pol_atoms, pol_idx = map_polarizable_atoms_cy(
         cut_mask, count_as="fortran"
     )
     m, n = full_connect.shape
