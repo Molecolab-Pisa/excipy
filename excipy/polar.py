@@ -34,7 +34,7 @@ from .elec import (
     WANGAL_FACTOR,
     electric_field,
 )
-from .selection import spherical_cutoff, _whole_residues_mm_cutoff
+from .selection import spherical_cutoff, whole_residues_cutoff, get_residues_array
 
 Trajectory = Union[pt.Trajectory, pt.TrajectoryIterator]
 
@@ -276,10 +276,9 @@ def _read_polar_and_smear(
 
 
 def _pol_from_spherical_cutoff(
-    topology: pt.Topology,
-    qm_mask: str,
     qm_coords: np.ndarray,
     full_coords: np.ndarray,
+    env_idx: np.ndarray,
     pol_cut: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """spherical cutoff
@@ -288,8 +287,6 @@ def _pol_from_spherical_cutoff(
     All the atoms within the pol_cut distance are retained.
     This means that many MM residues will likely be split in a half.
     """
-    env_mask = compute_environment_mask(topology, qm_mask, qm_mask)
-    env_idx = np.arange(topology.n_atoms)[env_mask]
     _, pol_coords, pol_idx, _ = spherical_cutoff(
         source_coords=qm_coords,
         ext_coords=full_coords[env_idx],
@@ -301,27 +298,32 @@ def _pol_from_spherical_cutoff(
 
 
 def _pol_from_whole_cutoff(
-    topology: pt.Topology, qm_mask: str, full_coords: np.ndarray, pol_cut: float
+    qm_coords: np.ndarray,
+    full_coords: np.ndarray,
+    env_idx: np.ndarray,
+    pol_cut: float,
+    residues_array: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """whole residues cuto
+    """whole residues cutoff
 
     Applies a cut around the QM region where MM residues are
     kept intact. More expensive than performing a spherical cutoff.
     """
-    _, pol_coords, _, pol_idx, _ = _whole_residues_mm_cutoff(
-        topology=topology,
-        coords=full_coords,
-        qm_mask=qm_mask,
-        mm_cut=pol_cut,
+    _, pol_coords, pol_idx, _ = whole_residues_cutoff(
+        source_coords=qm_coords,
+        ext_coords=full_coords[env_idx],
+        residues_array=residues_array,
+        cutoff=pol_cut,
     )
+    pol_idx = env_idx[pol_idx]
     return pol_coords, pol_idx
 
 
 def _apply_pol_cutoff(
-    topology: pt.Topology,
-    qm_mask: str,
     qm_coords: np.ndarray,
     full_coords: np.ndarray,
+    env_idx: np.ndarray,
+    residues_array: np.ndarray,
     pol_cut: float,
     strategy: str,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -334,18 +336,18 @@ def _apply_pol_cutoff(
     """
     if strategy.lower() == "spherical":
         pol_coords, pol_idx = _pol_from_spherical_cutoff(
-            topology,
-            qm_mask,
-            qm_coords,
-            full_coords,
-            pol_cut,
+            qm_coords=qm_coords,
+            full_coords=full_coords,
+            env_idx=env_idx,
+            pol_cut=pol_cut,
         )
     elif strategy == "whole":
         pol_coords, pol_idx = _pol_from_whole_cutoff(
-            topology,
-            qm_mask,
-            full_coords,
-            pol_cut,
+            qm_coords=qm_coords,
+            full_coords=full_coords,
+            env_idx=env_idx,
+            residues_array=residues_array,
+            pol_cut=pol_cut,
         )
     else:
         raise ValueError('cutoff strategy must be either "spherical" or "whole"')
@@ -456,6 +458,9 @@ def mmpol_coup_lr(
     iterator = _set_iterator(
         trajectory, f": {residue_id1}_{residue_id2} MMPol Linear Response:"
     )
+    env_mask = compute_environment_mask(topology, mask1, mask2)
+    env_idx = np.arange(num_atoms)[env_mask]
+    residues_array = get_residues_array(topology, env_idx)
     coups = []
     dipoles = []
     for i, frame in enumerate(iterator):
@@ -464,10 +469,14 @@ def mmpol_coup_lr(
         qm2_coords = coords2[i]
         qm1_charges = charges1[i]
         qm2_charges = charges2[i]
-        pair_mask = make_pair_mask(mask1, mask2)
         qm_coords = np.concatenate((qm1_coords, qm2_coords), axis=0)
         pol_coords, pol_idx = _apply_pol_cutoff(
-            topology, pair_mask, qm_coords, full_coords, pol_threshold, cut_strategy
+            qm_coords=qm_coords,
+            full_coords=full_coords,
+            env_idx=env_idx,
+            residues_array=residues_array,
+            strategy=cut_strategy,
+            pol_cut=pol_threshold,
         )
         pol_coords, pol_idx, alpha = _exclude_zero_polar(
             polarizabilities, pol_idx, pol_coords
@@ -568,6 +577,9 @@ def mmpol_site_lr(
     # connectivity is needed only for the tmu solver
     connectivity = build_connectivity_matrix(topology, count_as="fortran")
     iterator = _set_iterator(trajectory, f": {residue_id} MMPol Linear Response:")
+    env_mask = compute_environment_mask(topology, mask, mask)
+    env_idx = np.arange(num_atoms)[env_mask]
+    residues_array = get_residues_array(topology, env_idx)
 
     energies = []
     dipoles = []
@@ -576,7 +588,12 @@ def mmpol_site_lr(
         qm_coords = coords[i]
         qm_charges = charges[i]
         pol_coords, pol_idx = _apply_pol_cutoff(
-            topology, mask, qm_coords, full_coords, pol_threshold, cut_strategy
+            qm_coords=qm_coords,
+            full_coords=full_coords,
+            env_idx=env_idx,
+            residues_array=residues_array,
+            strategy=cut_strategy,
+            pol_cut=pol_threshold,
         )
         pol_coords, pol_idx, alpha = _exclude_zero_polar(
             polarizabilities, pol_idx, pol_coords
