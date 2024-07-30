@@ -52,6 +52,7 @@ entry_points = {
     "console_scripts": [
         "excipy=excipy.cli:main",
         "excipy2exat=excipy.cli:excipy2exat",
+        "excipy-scan=excipy.cli:excipy_scan",
     ],
 }
 

@@ -949,6 +949,215 @@ def excipy2exat():
 
 
 # =============================================================================
+# Tools: Excipy-Scan
+# =============================================================================
+
+
+def excipy_scan_parse(argv):
+    "Command line parser"
+    parser = ArgumentParser(
+        prog=sys.argv[0],
+        description="Perform a scan, turning off residues one at the time, and computing the relative site energies in environment",
+    )
+
+    inpt = parser.add_argument_group("required")
+    opt = inpt.add_argument
+
+    opt(
+        "-c",
+        "--coordinates",
+        required=True,
+        help="Molecular Dynamics trajectory coordinates (.nc, .xtc, ...)",
+    )
+
+    opt(
+        "-p",
+        "--parameters",
+        required=True,
+        help="Molecular Dynamics parameters/topology (.prmtop, .gro, ...)",
+    )
+
+    opt(
+        "-r",
+        "--residue_id",
+        required=True,
+        help="Residue IDs (e.g., 1 to select the first residue)",
+    )
+
+    opt(
+        "-t",
+        "--turnoff_masks",
+        required=True,
+        nargs="+",
+        help="Amber masks to turn off (no electrostatics) some part of the MM region (e.g., ':1' to turn off electrostatics of resid 1)",
+    )
+
+    optional = parser.add_argument_group("optional")
+    opt = optional.add_argument
+
+    opt(
+        "-f",
+        "--frames",
+        required=False,
+        nargs="+",
+        default=[None, None, None],
+        help="Frames to load, [start, stop, step] format, one-based count.",
+    )
+
+    opt(
+        "--pol_cutoff",
+        required=False,
+        default=15.0,
+        type=float,
+        help="Polarization cutoff in Angstrom (no polarization for molecules farther than cutoff).",
+    )
+
+    opt(
+        "--elec_cutoff",
+        required=False,
+        default=30.0,
+        type=float,
+        help="Cutoff for electrostatics in Angstrom.",
+    )
+
+    opt(
+        "--no_site_pol",
+        required=False,
+        action="store_true",
+        help="Whether to not compute the MMPol contribution to the site energies.",
+    )
+
+    opt(
+        "--models",
+        required=False,
+        metavar="KEY=VALUE",
+        nargs="+",
+        help="Specify the desired model for each molecule.",
+    )
+
+    opt(
+        "--database_folder",
+        required=False,
+        default=None,
+        help="Absolute path to a custom database folder.",
+    )
+
+    opt(
+        "--charges_db",
+        required=False,
+        default=None,
+        help="database file containing static and pol charges and polarizabilities",
+    )
+
+    outfiles = parser.add_argument_group("output files")
+    opt = outfiles.add_argument
+
+    opt(
+        "--outfile",
+        required=False,
+        default="scan.h5",
+        help="Output file (HDF5).",
+    )
+
+    args = parser.parse_args(argv[1:])
+    return args, parser
+
+
+def excipy_scan():
+    logo()
+
+    args, parser = excipy_scan_parse(sys.argv)
+    print_cli_arguments(args)
+
+    models = parse_models(args.models)
+
+    print_begin()
+
+    if args.database_folder is not None:
+        set_database_folder(args.database_folder)
+
+    create_hdf5_outfile(args.outfile)
+    save_residue_ids([args.residue_id], args.outfile)
+
+    n_frames = pt.iterload(args.coordinates, top=args.parameters).n_frames
+    frame_slice = parse_frames(args.frames, n_frames, return_slice=True)
+    traj = pt.iterload(args.coordinates, top=args.parameters, frame_slice=frame_slice)
+    save_n_frames(traj.n_frames, args.outfile)
+
+    read_alphas = False if args.no_site_pol else True
+
+    mol = Molecule(
+        traj=traj,
+        resid=args.residue_id,
+        model_dict=models,
+        elec_cutoff=args.elec_cutoff,
+        pol_cutoff=args.pol_cutoff,
+        turnoff_mask=None,
+        charges_db=args.charges_db,
+        template_mol2=None,
+        read_alphas=read_alphas,
+    )
+
+    print_section("computing the vacuum site energy")
+
+    site_vac = mol.vac_site_energy
+    save_site_energies(
+        site_vac.value, site_vac.var, mol.resid, kind="vac", outfile=args.outfile
+    )
+
+    # Note: loop over the turnoff masks and compute the site
+    #   we could take advantage of the linearity of the potential
+    #   and avoid recomputing it each time, but if we do so we
+    #   should also implement a guard against residues that are
+    #   outside the pol cutoff. keeping it simple here, but leaving
+    #   this comment so you know how to make the code faster.
+    for toff in args.turnoff_masks:
+
+        print_section(
+            "computing environment site energies for" f' turnoff mask "{toff:s}"'
+        )
+        # set base attribute, trigger recalc of cached properties
+        mol.turnoff_mask = toff
+        out_mask = mol.resid + "_toff_" + mol.turnoff_mask
+
+        print_action("computing the environment site energy")
+        # electrochromic shift
+        site_env_shift = mol.env_shift_site_energy
+        save_site_energies(
+            site_env_shift.value,
+            site_env_shift.var,
+            out_mask,
+            kind="env_shift",
+            outfile=args.outfile,
+        )
+
+        # energy in environment
+        site_env = mol.env_site_energy
+        save_site_energies(
+            site_env.value, site_env.var, out_mask, kind="env", outfile=args.outfile
+        )
+
+        if excipy.available_polarizable_module and not args.no_site_pol:
+
+            print_action("computing the linear-response contribution")
+            # linear response contribution
+            site_pol_shift = mol.pol_LR_site_energy
+            save_site_energies(
+                site_pol_shift.value,
+                site_pol_shift.var,
+                out_mask,
+                kind="pol_shift",
+                outfile=args.outfile,
+            )
+
+            # energy in polarizable environment
+            site_pol = mol.pol_site_energy
+            save_site_energies(
+                site_pol.value, site_pol.var, out_mask, kind="pol", outfile=args.outfile
+            )
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
