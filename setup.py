@@ -2,15 +2,7 @@ import numpy as np
 from numpy.distutils.core import setup, Extension
 from Cython.Build import cythonize
 
-
-ext_modules = [
-    Extension(
-        name="excipy.tmu",
-        sources=["excipy/tmu.f90"],
-        extra_f90_compile_args=["-O3", "-fopenmp"],
-        extra_link_args=["-lgomp"],
-    ),
-]
+ext_modules = []
 
 ext_modules += cythonize(
     Extension(
@@ -36,6 +28,16 @@ ext_modules += cythonize(
         ["excipy/cython/map_polarizable_atoms.pyx"],
         include_dirs=[np.get_include()],
         extra_compile_args=["-O3"],
+    )
+)
+
+ext_modules += cythonize(
+    Extension(
+        "excipy.clib.tmu",
+        ["excipy/cython/tmu.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3", "-fopenmp"],
+        extra_link_args=["-lgomp"],
     )
 )
 

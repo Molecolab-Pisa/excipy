@@ -19,7 +19,7 @@ from typing import Union, List, Tuple, Iterator, Any
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, cg
 import pytraj as pt
-from .tmu import tmu as tmu_fortran
+from .clib import tmu_cy
 from .util import ANG2BOHR, HARTREE2CM_1
 from .util import (
     make_pair_mask,
@@ -182,7 +182,7 @@ class TmuOperator(LinearOperator):
         return y
 
 
-def tmu_fortran_wrapper(
+def tmu_cython_wrapper(
     mu, alpha, thole, pol_coords, iscreen=1, nn_list=None, dodiag=False
 ):
     """
@@ -209,7 +209,7 @@ def tmu_fortran_wrapper(
     dodiag     : bool
                Whether to include the diagonal contribution.
     """
-    E = tmu_fortran(mu.T, alpha, thole, nn_list.T, pol_coords.T, iscreen).T
+    E = tmu_cy(mu, alpha, thole, nn_list, pol_coords, iscreen)
     if dodiag:
         E += mu / alpha[:, None]
     return E
@@ -398,7 +398,7 @@ def _solve_mu_ind(
     alpha3 = np.column_stack((alpha, alpha, alpha))
     TT = TmuOperator(
         n_atoms=n_pol_atoms,
-        func=tmu_fortran_wrapper,
+        func=tmu_cython_wrapper,
         alpha=alpha,
         thole=thole,
         pol_coords=pol_coords,

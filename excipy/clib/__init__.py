@@ -16,3 +16,4 @@
 from .retain_full_residues import retain_full_residues_cy
 from .distances_diffmask import distances_diffmask_cy
 from .map_polarizable_atoms import map_polarizable_atoms_cy
+from .tmu import tmu_cy

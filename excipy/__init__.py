@@ -29,18 +29,15 @@ from . import models
 # Cython functions
 from . import clib
 
-# We make this import conditional on whether
-# the user has compiled the Fortran code.
 try:
     from . import polar
-    from . import tmu
+    from .clib import tmu_cy
 
     available_polarizable_module = True
 except ImportError:
     logging.warning(
-        "Fortran code tmu.f90 not compiled. This means"
-        " you cannot compute the environment polarization"
-        " contribution to the Coulomb coupling."
+        "Something went wrong with the compilation of Cython code."
+        " Polarizable module not available."
     )
     available_polarizable_module = False
 
