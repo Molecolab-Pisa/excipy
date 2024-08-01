@@ -65,6 +65,15 @@ def logo():
     )
 
 
+def version():
+    print(
+        Colors.bold
+        + Colors.green
+        + "version: {:s}".format(excipy.__version__)
+        + Colors.null
+    )
+
+
 def cli_parse(argv):
     "Command line parser"
     parser = ArgumentParser(
@@ -921,6 +930,7 @@ def excipy2exat_block_average(exat_quantities, frames, args):
 
 def excipy2exat():
     logo()
+    version()
 
     args, parser = excipy2exat_parse(sys.argv)
     print_cli_arguments(args)
@@ -1065,6 +1075,7 @@ def excipy_scan_parse(argv):
 
 def excipy_scan():
     logo()
+    version()
 
     args, parser = excipy_scan_parse(sys.argv)
     print_cli_arguments(args)
@@ -1164,6 +1175,7 @@ def excipy_scan():
 
 def main():
     logo()
+    version()
 
     args, parser = cli_parse(sys.argv)
     print_cli_arguments(args)

@@ -13,3 +13,4 @@ logo/
 *.egg-info
 *.so
 /*.sh
+excipy/_version.py

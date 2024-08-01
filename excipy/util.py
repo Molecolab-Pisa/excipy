@@ -26,6 +26,8 @@ from numpy import pi as PI
 from tqdm import tqdm
 import h5py
 
+from ._version import __version__
+
 
 # =============================================================================
 # Constants
@@ -153,8 +155,8 @@ def create_hdf5_outfile(outfile):
     # If the file is already there, create a backup copy
     if os.path.isfile(outfile):
         backup_file(outfile, 0)
-    with h5py.File(outfile, "w"):
-        pass
+    with h5py.File(outfile, "w") as hf:
+        hf.attrs["version"] = __version__
 
 
 def save_n_frames(n_frames, outfile):
@@ -288,6 +290,25 @@ def save_site_energies(value, var, residue_id, kind, outfile):
 # =============================================================================
 # Reading functions
 # =============================================================================
+
+
+def load_version(outfile):
+    """
+    Reads the version of excipy that was used to dump the HDF5 file.
+    The version carries information on the excipy version itself (as
+    declared in setup.py) and also on the git commit.
+    Arguments
+    ---------
+    outfile: str
+        Filename
+    Returns
+    -------
+    version: str
+        excipy version used to dump the file.
+    """
+    with h5py.File(outfile, "r") as hf:
+        version = hf.attrs["version"]
+    return version
 
 
 def load_n_frames(outfile):

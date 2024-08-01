@@ -48,3 +48,8 @@ try:
 except ImportError:
     logging.warning("pyopenmmpol is not available.")
     available_intf_ommp = False
+
+# get the automatically-generated version
+from ._version import __version__
+
+__version__ = __version__
