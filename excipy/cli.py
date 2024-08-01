@@ -78,7 +78,7 @@ def cli_parse(argv):
     "Command line parser"
     parser = ArgumentParser(
         prog=sys.argv[0],
-        description="Regression-based estimation of the Coulomb coupling.",
+        description="Machine learning models for a fast estimation of excitonic Hamiltonians.",
     )
 
     required = parser.add_argument_group("required")
