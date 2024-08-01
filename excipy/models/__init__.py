@@ -39,8 +39,15 @@ In theory, each model should implement the following predictions:
 * polarizable LR contribution
 * polarizable site energy
 
-At the end, make the model available in the dictionary below
-("available_models").
+At the end, make the model available in the ``available_models`` dictionary.
+For example, if you create a class ``MyModel``, to make it available within
+excipy you can choose a unique string identifier and register your model as
+
+>>> available_models = {
+...     "CLA": {"mymodel": MyModel()},
+... }
+
+In this way, ``MyModel`` will be available for chlorophylls `a`.
 """
 
 from .jctc2023 import Model_JCTC2023

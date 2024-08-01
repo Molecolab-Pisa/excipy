@@ -13,6 +13,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+This module contains functions that usually enter performance-critical
+parts of the excipy code. They are written in Cython and optimized for speed.
+"""
 from .retain_full_residues import retain_full_residues_cy
 from .distances_diffmask import distances_diffmask_cy
 from .map_polarizable_atoms import map_polarizable_atoms_cy

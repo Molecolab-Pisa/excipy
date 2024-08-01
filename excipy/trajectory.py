@@ -24,12 +24,14 @@ def iterxyz(traj, mask):
     """
     Iterate over a pytraj Trajectory and collect the atomic coordinates
     that correspond to the AMBER mask.
+
     Arguments
     ---------
     traj       : pytraj.Trajectory
                Trajectory
     mask       : str
                AMBER mask
+
     Returns
     -------
     coords     : ndarray, (num_samples, num_atoms, 3)
@@ -51,6 +53,7 @@ def parse_ensure_order(traj, mask, top, names, typ):
     Collect atomic coordinates and atomic numbers for atoms selected by an AMBER
     mask.
     Coordinates are collected matching the atom ordering specified in names.
+
     Arguments
     ---------
     traj      : pytraj.Trajectory
@@ -61,6 +64,7 @@ def parse_ensure_order(traj, mask, top, names, typ):
               Topology
     names     : list of str
               List of atom names
+
     Returns
     -------
     xyz       : ndarray, (num_samples, num_atoms, 3)
@@ -123,6 +127,7 @@ def parse_masks(traj, masks, atom_names, types):
     """
     Parse the AMBER masks, collecting coordinates and atomic numbers
     with the same atomic order as specified by atom_names.
+
     Arguments
     ---------
     traj       : pytraj.Trajectory
@@ -131,6 +136,7 @@ def parse_masks(traj, masks, atom_names, types):
                List of AMBER masks
     atom_names : list of lists
                Each sublist if a list of atom names (str)
+
     Returns
     -------
     coords     : list of ndarray, (num_samples, num_atoms, 3)

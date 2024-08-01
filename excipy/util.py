@@ -98,6 +98,7 @@ class Prediction(NamedTuple):
 def build_connectivity_matrix(topology, count_as="python"):
     """
     Build the connectivity matrix given a topology
+
     Arguments
     ---------
     topology     : pytraj.Topology
@@ -105,6 +106,7 @@ def build_connectivity_matrix(topology, count_as="python"):
     count_as     : str
                  If 'fortran', counts starting from 1
                  If 'python', counts starting from 0
+
     Returns
     -------
     connectivity : ndarray, (num_atoms, max_connections)
@@ -392,6 +394,7 @@ def load_atom_numbers(outfile):
 def load_couplings(outfile, kind, units="cm_1", frames=None):
     """
     Load the couplings from a HDF5 file.
+
     Arguments
     ---------
     outfile   : str
@@ -403,6 +406,7 @@ def load_couplings(outfile, kind, units="cm_1", frames=None):
               Units (cm_1 or eV)
     frames    : None or ndarray
               Frames to load
+
     Returns
     -------
     coups     : dict
@@ -918,6 +922,7 @@ def dump_exat_files(exat_quantities, outname="exat"):
     """
     Dump the loaded exat quantities as a NumPy`s .npz file
     that can be parsed directly with exat.
+
     Arguments
     ---------
     exat_quantities  : dict

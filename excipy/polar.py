@@ -13,8 +13,19 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+#######
+Summary
+#######
+Polarization module. Contains functions to solve the polarization
+equation Tμ = E.
+
+Besides that, there are two handy wrappers to compute the linear
+response contribution for both the Coulomb coupling and the site
+energy.
+"""
 from __future__ import annotations
-from typing import Union, List, Tuple, Iterator, Any
+from typing import Union, List, Tuple, Iterator, Any, Callable
 
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, cg
@@ -49,6 +60,7 @@ def compute_environment_mask(topology, mask1, mask2):
     """
     Given the masks of two pigments, not considered part of
     the environment, get the mask of the environment atoms.
+
     Arguments
     ---------
     topology  : pytraj.Topology
@@ -57,6 +69,7 @@ def compute_environment_mask(topology, mask1, mask2):
               Mask of the first pigment
     mask2     : str
               Mask of the second pigment
+
     Returns
     -------
     mask     : ndarray, (num_atoms)
@@ -137,25 +150,25 @@ def _build_pol_neighbor_list(full_connect, cut_mask):
 
 class TmuOperator(LinearOperator):
     """
-    Interface operator for computing T*mu when solving linear systems
+    Interface operator for computing Tμ=E when solving linear systems
     using SciPy's classes. This interface provides a method to compute
-    T*mu, i.e., a linear system is solvable without computing the full T.
-    Can be used when mu has shape (N,3) and we want to pass some additional arguments.
+    Tμ without instantiating T.
+    Can be used when mu has shape (N,3) and we want to pass some additional
+    arguments.
+
+    Arguments
+    ---------
+    n_atoms   : int
+              total number of atoms
+    func      : python method
+              inner function computing T*mu
+    args      :
+              arguments provided to `func`
+    kwargs    :
+              keyword arguments provided to `func`
     """
 
-    def __init__(self, n_atoms, func, *args, **kwargs):
-        """
-        Arguments
-        ---------
-        n_atoms   : int
-                  total number of atoms
-        func      : python method
-                  inner function computing T*mu
-        args      :
-                  arguments provided to `func`
-        kwargs    :
-                  keyword arguments provided to `func`
-        """
+    def __init__(self, n_atoms: int, func: Callable, *args, **kwargs) -> None:
         # super().__init__(dtype, self.shape)
         # The `shape` and `dtype` must be implemented.
         self.shape = (n_atoms * 3, n_atoms * 3)
@@ -164,10 +177,10 @@ class TmuOperator(LinearOperator):
         self.args = args
         self.kwargs = kwargs
 
-    def _matvec(self, x):
+    def _matvec(self, x: np.ndarray) -> np.ndarray:
         return self.func(x, *self.args, **self.kwargs).ravel()
 
-    def matvec(self, x):
+    def matvec(self, x: np.ndarray) -> np.ndarray:
         x = np.asanyarray(x)
         m, n = self.shape
         if x.shape[0] != n:
@@ -186,7 +199,8 @@ def tmu_cython_wrapper(
     mu, alpha, thole, pol_coords, iscreen=1, nn_list=None, dodiag=False
 ):
     """
-    Wrapper to call FORTRAN code that computes T*mu
+    Wrapper to call FORTRAN code that computes Tμ=E
+
     Arguments
     ---------
     mu         : ndarray, (num_pol_atoms, 3)
@@ -208,6 +222,11 @@ def tmu_cython_wrapper(
                Neighbor list with second and third neighbors.
     dodiag     : bool
                Whether to include the diagonal contribution.
+
+    Returns
+    -------
+    E: np.ndarray
+        electric field.
     """
     E = tmu_cy(mu, alpha, thole, nn_list, pol_coords, iscreen)
     if dodiag:
@@ -380,7 +399,7 @@ def _pol_cut_mask(num_atoms: int, pol_idx: np.ndarray) -> np.ndarray:
     return cut_mask
 
 
-def _solve_mu_ind(
+def solve_mu_ind(
     alpha: np.ndarray,
     electric_field: np.ndarray,
     pol_coords: np.ndarray,
@@ -392,6 +411,24 @@ def _solve_mu_ind(
 
     Solves for the induced dipoles using a preconditioned conjugate gradient
     solver.
+
+    Parameters
+    ----------
+    alpha: np.ndarray
+        polarizabilities.
+    electric_field: np.ndarray
+        inducing electric field.
+    pol_coords: np.ndarray
+        coordinates of the polarizable part.
+    nn_list: np.ndarray
+        nearest neighbors matrix.
+    iscreen: int
+        use 0 for no screening, 1 for thole screening, 2 for exponential screening.
+    dodiag: bool
+        whether to also compute the diagonal contribution.
+
+    Returns
+    -------
     """
     n_pol_atoms = len(alpha)
     thole = _compute_thole_factor(alpha)
@@ -446,6 +483,48 @@ def mmpol_coup_lr(
 
     Computes the linear response term of the electronic coupling along
     a trajectory for a specific pair of chromophores.
+
+    Arguments
+    ---------
+    trajectory: pt.TrajectoryIterator
+        trajectory.
+    coords1: np.ndarray
+        coordinates of the first pigment.
+    coords2: np.ndarray
+        coordinates of the second pigment.
+    charges1: np.ndarray
+        charges of the first pigment.
+    charges2: np.ndarray
+        charges of the second pigment.
+    residue_id1: str
+        id of the first pigment.
+    residue_id2: str
+        id of the second pigment.
+    mask1: str
+        AMBER masks of the first pigment.
+    mask2: str
+        AMBER masks of the second pigment.
+    pol_threshold: float
+        polarization cutoff
+    cut_strategy: str
+        'spherical' will perform a spherical cut of the MM part.
+        'whole' will retain residues as a whole in the MM part.
+    smear_link: bool
+        whether to smear the charges and polarizabilities
+        if the QM part is covalently linked to the MM part.
+    db: str
+        charges database.
+    mol2: str
+        template mol2.
+    turnoff_mask: str
+        AMBER mask that excludes atoms from the MM part.
+
+    Returns
+    -------
+    lr: np.ndarray
+        linear response couplings.
+    mu: list of np.ndarray
+        induced dipoles.
     """
     topology = trajectory.topology
     num_atoms = topology.n_atoms
@@ -490,7 +569,7 @@ def mmpol_coup_lr(
         )
         elec_field1 = electric_field(pol_coords, qm1_coords, qm1_charges)
         elec_field2 = electric_field(pol_coords, qm2_coords, qm2_charges)
-        mu, info = _solve_mu_ind(
+        mu, info = solve_mu_ind(
             alpha, elec_field1, pol_coords, nn_list, iscreen=1, dodiag=True
         )
         Vmmp = -np.sum(mu * elec_field2.ravel())
@@ -520,6 +599,44 @@ def batch_mmpol_coup_lr(
 
     Computes the Linear Response term of the electronic coupling
     along a trajectory and for all the pairs specified in `pairs`.
+
+    Arguments
+    ---------
+    trajectory: pt.TrajectoryIterator
+        trajectory.
+    coords: list of np.ndarray
+        coordinates of the pigments.
+    charges: list of np.ndarray
+        charges of the pigemnts.
+    residue_ids: list of str
+        names of the pigments.
+    masks: list of str
+        AMBER masks of the pigments.
+    pairs: list of list of int
+        pairs of indeces identifying the molecules in the
+        given lists, for which we want to compute the LR
+        coupling.
+    pol_threshold: float
+        polarization cutoff
+    cut_strategy: str
+        'spherical' will perform a spherical cut of the MM part.
+        'whole' will retain residues as a whole in the MM part.
+    smear_link: bool
+        whether to smear the charges and polarizabilities
+        if the QM part is covalently linked to the MM part.
+    db: str
+        charges database.
+    mol2: str
+        template mol2.
+    turnoff_mask: str
+        AMBER mask that excludes atoms from the MM part.
+
+    Returns
+    -------
+    lr: list of np.ndarray
+        linear response couplings.
+    mu: list of list of np.ndarray
+        induced dipoles.
     """
     out_lr = []
     out_mu = []
@@ -568,6 +685,40 @@ def mmpol_site_lr(
 
     Computes the Linear Response term of the excitation energy along
     a trajectory for a single residue.
+
+    Arguments
+    ---------
+    trajectory: pt.TrajectoryIterator
+        trajectory.
+    coords: np.ndarray
+        coordinates of a pigment.
+    charges: np.ndarray
+        charges of a pigment.
+    residue_id: str
+        id of a pigment.
+    masks: str
+        AMBER masks of a pigment.
+    pol_threshold: float
+        polarization cutoff
+    cut_strategy: str
+        'spherical' will perform a spherical cut of the MM part.
+        'whole' will retain residues as a whole in the MM part.
+    smear_link: bool
+        whether to smear the charges and polarizabilities
+        if the QM part is covalently linked to the MM part.
+    db: str
+        charges database.
+    mol2: str
+        template mol2.
+    turnoff_mask: str
+        AMBER mask that excludes atoms from the MM part.
+
+    Returns
+    -------
+    lr: np.ndarray
+        linear response energies.
+    mu: list of np.ndarray
+        induced dipoles.
     """
     topology = trajectory.topology
     num_atoms = topology.n_atoms
@@ -605,7 +756,7 @@ def mmpol_site_lr(
         pol_coords, qm_coords = _angstrom2bohr(pol_coords, qm_coords)
         elec_field = electric_field(pol_coords, qm_coords, qm_charges)
         # mu induced by electric field
-        mu, info = _solve_mu_ind(
+        mu, info = solve_mu_ind(
             alpha, elec_field, pol_coords, nn_list, iscreen=1, dodiag=True
         )
         # interaction with source field
@@ -636,6 +787,40 @@ def batch_mmpol_site_lr(
 
     Computes the Linear Response term of the energy along a trajectory
     for all the residues listed in `residue_ids`.
+
+    Arguments
+    ---------
+    trajectory: pt.TrajectoryIterator
+        trajectory.
+    coords: list of np.ndarray
+        coordinates of the pigments.
+    charges: list of np.ndarray
+        charges of the pigemnts.
+    residue_ids: list of str
+        names of the pigments.
+    masks: list of str
+        AMBER masks of the pigments.
+    pol_threshold: float
+        polarization cutoff
+    cut_strategy: str
+        'spherical' will perform a spherical cut of the MM part.
+        'whole' will retain residues as a whole in the MM part.
+    smear_link: bool
+        whether to smear the charges and polarizabilities
+        if the QM part is covalently linked to the MM part.
+    db: str
+        charges database.
+    mol2: str
+        template mol2.
+    turnoff_mask: str
+        AMBER mask that excludes atoms from the MM part.
+
+    Returns
+    -------
+    lr: list of np.ndarray
+        linear response energies.
+    mu: list of list of np.ndarray
+        induced dipoles.
     """
     out_lr = []
     out_mu = []

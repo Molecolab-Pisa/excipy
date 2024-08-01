@@ -13,6 +13,12 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+#######
+Summary
+#######
+Module containing functions to handle the electrostatics of the system.
+"""
 from __future__ import annotations
 from typing import Dict, Tuple, List
 import warnings
@@ -107,9 +113,22 @@ def compute_polarizabilities(
     topology: pt.Topology, poldict: Dict[str, float] = WANGAL
 ) -> np.ndarray:
     """
-    Assign the atomic polarizability for each atom in the topology.
-    Arguments
-    ---------
+    Assigns the atomic polarizability for each atom in the topology.
+    The polarizability is inferred from the atomic number, extracted
+    from the topology.
+
+    Currently, we provide only the WangAl polarizabilities.
+    To compute them
+
+    >>> alphas = compute_polarizabilities(traj.top)
+
+    Note
+    ----
+    If the atomic numbers in the topology are broken, the
+    polarizabilities will be broken too.
+
+    Parameters
+    ----------
     topology  : pytraj.Topology
               Trajectory topology
     poldict   : dict
@@ -173,6 +192,33 @@ def link_atom_smear(
     pol_charges: np.ndarray,
     alphas: np.ndarray,
 ):
+    """
+    Smears the charge and polarizabilities onto the MM boundary
+    if the QM part is covalently linked to the MM part.
+
+    Parameters
+    ----------
+    top: pt.Topology
+        trajectory topology.
+    qm_idx: np.ndarray
+        indices of the QM atoms.
+    charges: np.ndarray
+        atomic charges of the whole system.
+    pol_charges: np.ndarray
+        atomic charges adapted for a polarizable embedding,
+        for the whole system.
+    alphas: np.ndarray
+        polarizabilities of the whole system.
+
+    Returns
+    -------
+    charges: np.ndarray
+        smeared atomic charges.
+    pol_charges: np.ndarray
+        smeared polarizable charges.
+    alphas: np.ndarray
+        smeared polarizabilities.
+    """
     for idx in qm_idx:
         is_link_atom = False
         charge = 0.0
@@ -232,25 +278,40 @@ def read_electrostatics(
     Reads the electrostatic parameters in multiple ways:
 
         (1) if a pytraj topology is passed:
-            charges = topology charges
-            pol_charges = charges
-            alphas = WangAL polarizabilities
+            * charges = topology charges
+            * pol_charges = charges
+            * alphas = WangAL polarizabilities
         (2) if a db is passed, reads these quantities from the db
 
-    Note: if terminal residues do not have a different name in the topology,
-          they cannot be identified. Use a mol2 together with a db for that case.
+    Note
+    ----
+    if terminal residues do not have a different name in the topology,
+    they cannot be identified. Use a mol2 together with a db for
+    that case.
 
-    Note: the mol2 is used only in conjunction with the db.
+    Note
+    ----
+    the mol2 is used only in conjunction with the db.
 
-    Args:
-        top: pytraj topology
-        db: path to database file
-        mol2: path to mol2 template file
-        warn: whether to issue user warnings
-    Returns:
-        charges: atomic charges
-        pol_charges: atomic charges compatible with polarizabilities
-        alphas: polarizabilities
+    Arguments
+    ---------
+    top: pt.Topology
+        trajectory topology.
+    db: str
+        path to database file
+    mol2: str
+        path to mol2 template file
+    warn: bool
+        whether to issue user warnings
+
+    Returns
+    -------
+    charges: np.ndarray
+        atomic charges
+    pol_charges: np.ndarray
+        atomic charges compatible with polarizabilities
+    alphas: np.ndarray
+        polarizabilities
     """
 
     db_available = db is not None
@@ -437,6 +498,7 @@ def electric_field(
     Computes the electric fields at points `target_coords`
     produced by a point charge distribution of point charges
     `source_charges` localized at `source_coords`.
+
     Arguments
     ---------
     target_coords  : ndarray, (num_targets, 3)
@@ -445,6 +507,7 @@ def electric_field(
                    Source coordinates
     source_charges : ndarray, (num_sources,)
                    Source charges
+
     Returns
     -------
     E              : ndarray, (num_targets, 3)
@@ -466,13 +529,21 @@ def coupling_qq(
     Computes the interaction energy between two distributions of point
     charges.
 
-    Args:
-        coords1: coordinates of the first set, (n_atoms1, 3)
-        charges1: charges of the first set, (n_atoms1,)
-        coords2: coordinates of the second set, (n_atoms2, 3)
-        charges2: charges of the second set, (n_atoms2,)
-    Returns:
-        coup: the interaction energy
+    Arguments
+    ---------
+    coords1: np.ndarray
+        coordinates of the first set, (n_atoms1, 3)
+    charges1: np.ndarray
+        charges of the first set, (n_atoms1,)
+    coords2: np.ndarray
+        coordinates of the second set, (n_atoms2, 3)
+    charges2: np.ndarray
+        charges of the second set, (n_atoms2,)
+
+    Returns
+    -------
+    coup: float
+        the interaction energy
     """
     coup = np.sum((coords1[:, None, :] - coords2[None, :, :]) ** 2, axis=-1) ** 0.5
     coup = np.sum(charges1[:, None] * charges2 / coup)
@@ -488,12 +559,14 @@ def _coulomb_coupling(coord_pairs: List[np.ndarray], charge_pairs: List[np.ndarr
     """
     Compute the Coulomb coupling between two
     distributions of point charges.
+
     Arguments
     ---------
     coord_pairs  : list of two ndarray, (num_samples, num_atoms, 3)
                  cartesian coordinates.
     charge_pairs : list of two ndarray, (num_samples, num_atoms)
                  point charges.
+
     Returns
     -------
     V            : ndarray, (num_frames,)
@@ -523,6 +596,7 @@ def coulomb_coupling(
     """
     Compute the Coulomb coupling between molecule pairs for a density
     projected onto point charges.
+
     Arguments
     ---------
     coords         : list of ndarray, (num_samples, num_atoms, 3)
@@ -584,6 +658,7 @@ def compute_coulomb_couplings(
     """
     Compute the Coulomb interaction between all
     unique pairs of molecules.
+
     Arguments
     ---------
     coords        : list of ndarray, (num_samples, num_atoms, 3)
@@ -596,6 +671,7 @@ def compute_coulomb_couplings(
                   Cutoff value. The coupling is computed for pairs within the cutoff.
     coupling_list : list of str
                   list of pairs of residues ids, e.g. ["664_665", "667_670", ...]
+
     Return
     ------
     couplings      : list of ndarray, (num_frames,)

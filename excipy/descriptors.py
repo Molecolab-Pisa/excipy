@@ -13,6 +13,26 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+#######
+Summary
+#######
+Module where the molecular descriptors are implemented. Each descriptor
+is implemented as a class that, when instantiated, takes all the necessary
+arguments to encode the geometry. Then, the encoding is obtained by calling
+the ``.encode()`` method of the class with no arguments.
+
+Currently, the following descriptors are available:
+
+* CoulombMatrix (with and without permutations)
+* BondMatrix (experimental, currently not used)
+* MMElectrostaticPotential
+
+If you need to add another descriptor, please feel free to do it and follow
+the same pattern.
+"""
+from __future__ import annotations
+from typing import List, Any, Optional, Union
 import numpy as np
 import pytraj as pt
 from collections.abc import Iterable
@@ -26,9 +46,12 @@ from .selection import get_residues_array, whole_residues_cutoff
 # =============================================================================
 
 
-def encode_geometry(descriptors, free_attr=None):
+def encode_geometry(
+    descriptors: List[Any], free_attr: Optional[str] = None
+) -> List[np.ndarray]:
     """
     Encode the geometry with the given descriptors.
+
     Arguments
     ---------
     descriptors  : list of object
@@ -37,6 +60,7 @@ def encode_geometry(descriptors, free_attr=None):
     free_attr    : None or iterable
                  Attribute(s) of the descriptor to eliminate after
                  the encoding.
+
     Returns
     -------
     encodings    : list of ndarray, (num_samples, num_features)
@@ -97,9 +121,16 @@ def _get_coulomb_matrix(coords, atnums, residue_id, triu=True, permute_groups=No
     )
 
 
-def get_coulomb_matrix(coords, atnums, residue_ids, triu=True, permute_groups=None):
+def get_coulomb_matrix(
+    coords: List[np.ndarray],
+    atnums: List[np.ndarray],
+    residue_ids: List[str],
+    triu: Optional[bool] = True,
+    permute_groups: List[List[int]] = None,
+) -> List[CoulombMatrix]:
     """
     Get the Coulomb Matrix associated with one or more molecule(s).
+
     Arguments
     ---------
     coords          : list of ndarray, (num_samples, num_atoms, 3)
@@ -113,6 +144,7 @@ def get_coulomb_matrix(coords, atnums, residue_ids, triu=True, permute_groups=No
                     the whole matrix (False)
     permute_groups  : list of lists
                     Atoms that have to be permuted
+
     Returns
     -------
     CoulombMatrix   : list of excipy.descriptors.CoulombMatrix
@@ -151,9 +183,12 @@ def _get_bond_matrix(coords, top, mask):
     )
 
 
-def get_bond_matrix(coords, top, masks):
+def get_bond_matrix(
+    coords: List[np.ndarray], top: pt.Topology, masks: List[str]
+) -> List[BondMatrix]:
     """
     Get the bond matrix associated with one or more molecules.
+
     Arguments
     ---------
     coords   : list of ndarray, (num_samples, num_atoms, 3)
@@ -162,6 +197,7 @@ def get_bond_matrix(coords, top, masks):
              Topology
     masks    : list of str
              List of AMBER masks
+
     Returns
     -------
     l        : list of excipy.descriptors.BondMatrix
@@ -175,6 +211,7 @@ def _get_MM_elec_potential(
 ):
     """
     Get the MM electrostatic potential acting on a single molecule.
+
     Arguments
     ---------
     traj         : pytraj.Trajectory
@@ -187,6 +224,7 @@ def _get_MM_elec_potential(
                  Frames to load
     turnoff_mask : str
                  AMBER mask of residues for which the electrostatics is not computed.
+
     Returns
     -------
     MMElectrostaticPotential : excipy.descriptors.MMElectrostaticPotential
@@ -205,25 +243,40 @@ def _get_MM_elec_potential(
 
 
 def get_MM_elec_potential(
-    traj, masks, cutoff, frames, turnoff_mask, charges_db, remove_mean, read_alphas
-):
+    traj: pt.TrajectoryIterator,
+    masks: List[str],
+    cutoff: float,
+    frames: Union[None, np.ndarray],
+    turnoff_mask: str,
+    charges_db: Union[None, str],
+    remove_mean: bool,
+    read_alphas: bool,
+) -> List[MMElectrostaticPotential]:
     """
     Get the MM electrostatic potential acting on one or more molecules.
+
     Arguments
     ---------
     traj         : pytraj.Trajectory
-                 Trajectory
+        Trajectory
     masks        : list of str
-                 List of AMBER mask
+        List of AMBER mask
     cutoff       : float
-                 Cutoff value for MM electrostatics
+        Cutoff value for MM electrostatics
     frames       : None or ndarray
-                 Frames to load
+        Frames to load
     turnoff_mask : str
-                 AMBER mask of residues for which the electrostatics is not computed.
+        AMBER mask of residues for which the electrostatics is not computed.
+    charges_db: str
+        path to the charges database, if given.
+    remove_mean: bool
+        whether to remove the mean over the QM atoms from the potential.
+    read_alphas: bool
+        whether to read/infer the polarizabilities in addition to the charges.
+
     Returns
     -------
-                 : list of excipy.descriptors.MMElectrostaticPotential
+    l            : list of excipy.descriptors.MMElectrostaticPotential
                  MMElectrostaticPotential objects
     """
     return [
@@ -249,24 +302,39 @@ def get_MM_elec_potential(
 class CoulombMatrix(object):
     """
     Coulomb Matrix encoder.
+    In order to compute the Coulomb Matrix descriptor, you can do
+
+    >>> cm = CoulombMatrix(coords, atnums, triu=False).encode()
+
+    and this will give you the full Coulomb Matrix.
+    If you need only the upper triangular part (no diagonal), then
+
+    >>> cm = CoulombMatrix(coords, atnums, triu=True).encode()
+
+    If you need to compute a permuted Coulomb Matrix, where identical
+    atoms are reordered according to the L2 norm of the corresponding
+    row, you must provide a list of lists, where each sublist is a list
+    of identical atoms. For example, if atoms 0, 1, and 2 are identical
+
+    >>> cm = CoulombMatrix(coords, atnums, triu=False,
+    ...                    permute_groups=[[0, 1, 2]]).encode()
+
+    Arguments
+    ---------
+    coords          : ndarray, (num_samples, num_atoms, 3)
+                    Atomic coordinates
+    atnums          : ndarray, (num_atoms,)
+                    Atomic numbers
+    residue_ids     : str
+                    Residue ID (only used in progress bar info)
+    triu            : bool
+                    Whether to encode only the upper triangular part (True) or
+                    the whole matrix (False)
+    permute_groups  : list of lists
+                    Atoms that have to be permuted
     """
 
     def __init__(self, coords, atnums, residue_id="", triu=True, permute_groups=None):
-        """
-        Arguments
-        ---------
-        coords          : ndarray, (num_samples, num_atoms, 3)
-                        Atomic coordinates
-        atnums          : ndarray, (num_atoms,)
-                        Atomic numbers
-        residue_ids     : str
-                        Residue ID (only used in progress bar info)
-        triu            : bool
-                        Whether to encode only the upper triangular part (True) or
-                        the whole matrix (False)
-        permute_groups  : list of lists
-                        Atoms that have to be permuted
-        """
         self.coords = coords
         self.atnums = atnums
         self.residue_id = residue_id
@@ -308,7 +376,7 @@ class CoulombMatrix(object):
         encoding = [e[np.triu_indices(n_atoms, k=1)] for e in encoding]
         return np.concatenate([encoding])
 
-    def encode(self):
+    def encode(self) -> np.ndarray:
         """
         Encode the molecular geometry as a Coulomb matrix.
         """
@@ -333,24 +401,25 @@ class MatrixPermutator(object):
     An object that permutes rows and columns of matrices, or entries of an array,
     based on the L2 norm of selected rows and columns of some matrices.
 
-    Example:
+    Example
+    -------
     If we have four atoms, C, C1, C2, C3, and C1, C2, C3 that are identical, the following
     two interaction matrices are equal
 
-          C  C1 C2 C3            C  C1 C2 C3
-    A = [[1, 1, 0, 0]      B = [[1, 0, 1, 0]
-         [1, 1, 0, 0]           [0, 1, 0, 0]
-         [0, 0, 1, 0]           [1, 0, 1, 0]
-         [0, 0, 0, 1]]          [0, 0, 0, 1]]
+    >>> #     C  C1 C2 C3            C  C1 C2 C3
+    >>> A = [[1, 1, 0, 0]      B = [[1, 0, 1, 0]
+    ...      [1, 1, 0, 0]           [0, 1, 0, 0]
+    ...      [0, 0, 1, 0]           [1, 0, 1, 0]
+    ...      [0, 0, 0, 1]]          [0, 0, 0, 1]]
 
     It then makes sense to permute rows and columns of the two matrices so that they also appear as equal.
     Sorting according to the L2 norm, they become
 
-          C  C1 C2 C3            C  C1 C2 C3
-    A = [[1, 0, 0, 1]      B = [[1, 0, 0, 1]
-         [0, 1, 0, 0]           [0, 1, 0, 0]
-         [0, 0, 1, 0]           [0, 0, 1, 0]
-         [1, 0, 0, 1]]          [1, 0, 0, 1]]
+    >>> #     C  C1 C2 C3            C  C1 C2 C3
+    >>> A = [[1, 0, 0, 1]      B = [[1, 0, 0, 1]
+    ...      [0, 1, 0, 0]           [0, 1, 0, 0]
+    ...      [0, 0, 1, 0]           [0, 0, 1, 0]
+    ...      [1, 0, 0, 1]]          [1, 0, 0, 1]]
 
     This class implements this transformation. It fits (stores the permuted indeces of the rows/
     columns to be permuted) a list of matrices, and can transform a list of matrices (the same
@@ -359,27 +428,37 @@ class MatrixPermutator(object):
     Transforming vectors can be useful as, if the permuted matrices are employed to fit a multiple-output
     regression model, one may also want to permute the target (otherwise the 1 to 1 correspondence between
     feature and target gets lost).
+
+    For example, to permute the rows/columns of identical atoms in the
+    CoulombMatrix
+
+    >>> cm = CoulombMatrix(coords, atnums, triu=False).encode()
+    >>> cm_permuted = MatrixPermutator(permute_groups).fit_transform(cm)
+
+    Note that you don't have to do this manually, instead the
+    ``MatrixPermutator`` class is handled inside the ``CoulombMatrix``
+    class.
+
+    The Matrix Permutator can also permute the positions in vectors,
+    instead of matrices.
+
+    Arguments
+    ---------
+    permute_groups : list of ndarrays
+                   indeces of the rows/columns to be permuted.
     """
 
     def __init__(self, permute_groups):
-        """
-        Arguments
-        ---------
-        permute_groups : list of ndarrays
-                       indeces of the rows/columns to be permuted.
-        """
         self.permute_groups = np.asarray(permute_groups)
 
-    def fit(self, matrices):
+    def fit(self, matrices: List[np.ndarray]):
         """
+        Finds the permutation indices.
+
         Arguments
         ---------
         matrices : list of ndarrays (k,k), or ndarray (n_mats, k, k)
                  list of matrices to fit.
-        Attributes
-        ----------
-        permuted_idx_ : ndarray (n_mats, n_permute_groups, len(permute_group))
-                      the list of the permuted indeces according to the L2 norm.
         """
         self.permuted_idx_ = []
         for mat in matrices:
@@ -392,7 +471,9 @@ class MatrixPermutator(object):
         self.permuted_idx_ = np.asarray(self.permuted_idx_)
         return self
 
-    def transform(self, arrays, subset_idxs=None):
+    def transform(
+        self, arrays: np.ndarray, subset_idxs: Optional[np.ndarray] = None
+    ) -> List[np.ndarray]:
         """
         Direct (forward) transformation: from a list of unpermuted arrays, generates
         a list of permuted arrays.
@@ -410,6 +491,7 @@ class MatrixPermutator(object):
                  set (e.g., [0, 2, 3]), then train_idx can be passed as subset_idx,
                  and only the permutations corresponding to these indeces are used
                  to transform the arrays.
+
         Returns
         -------
         trasnformed_arrays : list or ndarray
@@ -426,13 +508,17 @@ class MatrixPermutator(object):
 
         return transform_fn(arrays, mode="forward", subset_idxs=subset_idxs)
 
-    def fit_transform(self, arrays, subset_idxs=None):
+    def fit_transform(
+        self, arrays: np.ndarray, subset_idxs: Optional[np.ndarray] = None
+    ) -> List[np.ndarray]:
         """
         Run `fit` and `transform` on the same arrays
         """
         return self.fit(arrays).transform(arrays, subset_idxs=subset_idxs)
 
-    def inverse_transform(self, arrays, subset_idxs=None):
+    def inverse_transform(
+        self, arrays: np.ndarray, subset_idxs: Optional[np.ndarray] = None
+    ) -> List[np.ndarray]:
         """
         Inverse (backward) transformation: from a list of permuted arrays, restores
         the original list of arrays.
@@ -450,6 +536,7 @@ class MatrixPermutator(object):
                  set (e.g., [0, 2, 3]), then train_idx can be passed as subset_idx,
                  and only the permutations corresponding to these indeces are used
                  to transform the arrays.
+
         Returns
         -------
         trasnformed_arrays : list or ndarray
@@ -539,21 +626,21 @@ class MatrixPermutator(object):
 
 
 class BondMatrix(object):
-    """
+    """bond matrix descriptor
+
     Encode the geometry as a list of covalent bond values.
+
+    Parameters
+    ----------
+    coords   : ndarray, (num_samples, num_atoms, 3)
+             Atomic coordinates
+    top      : pytraj.Topology
+             Topology
+    mask     : str
+             AMBER mask
     """
 
     def __init__(self, coords, top, mask):
-        """
-        Arguments
-        ---------
-        coords   : ndarray, (num_samples, num_atoms, 3)
-                 Atomic coordinates
-        top      : pytraj.Topology
-                 Topology
-        mask     : str
-                 AMBER mask
-        """
         self.coords = coords
         self.top = top
         self.mask = mask
@@ -621,42 +708,89 @@ class BondMatrix(object):
 
 
 class MMElectrostaticPotential(object):
-    """Electrostatic potential of a MM trajectory"""
+    """electrostatic potential descriptor
+
+    Electrostatic potential of a MM trajectory.
+    To compute the electrostatic potential of the MM part on the QM
+    atoms, with an electrostatic cutoff of 30 angstrom, you can do
+
+    >>> pot = MMElectrostaticPotential(
+    ...     traj=traj,
+    ...     mask=mask,
+    ...     cutoff=30.,
+    ... ).encode()
+
+    You can decide to switch off some MM residue by providing the
+    corresponding mask. For example, to turn off residue 1
+
+    >>> pot = MMElectrostaticPotential(
+    ...     traj=traj,
+    ...     mask=mask,
+    ...     cutoff=30.,
+    ...     turnoff_mask=":10",
+    ... ).encode()
+
+    If you want to remove the mean of the potential over the QM atoms
+
+    >>> pot = MMElectrostaticPotential(
+    ...     traj=traj,
+    ...     mask=mask,
+    ...     cutoff=30.,
+    ...     remove_mean=True
+    ... ).encode()
+    >>> print(np.mean(pot, axis=1)) # will print 0
+
+    If you don't want to use the prmtop charges, you can provide a
+    database file. It is a three column file with the following
+    columns: RESIDUE_NAME (str) ATOM_NAME (str) CHARGE (float).
+    Then, give it to the class
+
+    >>> pot = MMElectrostaticPotential(
+    ...     traj=traj,
+    ...     mask=mask,
+    ...     cutoff=30.,
+    ...     charges_db=charges_db,
+    ... ).encode()
+
+    Arguments
+    ---------
+    traj       : pytraj.Trajectory
+    mask       : str
+               Amber mask of the atoms where you want to compute the potential
+    cutoff     : float
+               Environment cutoff (atoms more distant than cutoff are excluded from the environment)
+    frames     : None or list
+               Frames considered for the calculation of the potential
+    turnoff_mask : str
+                 Mask of the atoms that you do not want to include in the environment
+    charges_db  : str
+                Path to a charges database.
+                The database is assumed to be of (at least) three columns
+                RESIDUE_NAME   ATOM_NAME   CHARGE
+                example:
+
+                ACE   H1    0.112300
+                ACE   CH3  -0.366200
+                ...
+                PC    O22  -0.596900
+                Additional columns are ignored.
+    remove_mean: bool
+                whether to remove the mean over the QM atoms from the potential.
+    read_alphas: bool
+                whether to read/infer the polarizabilities in addition to the charges.
+    """
 
     def __init__(
         self,
-        traj,
-        mask,
-        cutoff,
-        frames=None,
-        turnoff_mask=None,
-        charges_db=None,
-        remove_mean=False,
-        read_alphas=True,
-    ):
-        """
-        Arguments
-        ---------
-        traj       : pytraj.Trajectory
-        mask       : str
-                   Amber mask of the atoms where you want to compute the potential
-        cutoff     : float
-                   Environment cutoff (atoms more distant than cutoff are excluded from the environment)
-        frames     : None or list
-                   Frames considered for the calculation of the potential
-        turnoff_mask : str
-                     Mask of the atoms that you do not want to include in the environment
-        charges_db  : str
-                    Path to a charges database.
-                    The database is assumed to be of (at least) three columns
-                    RESIDUE_NAME   ATOM_NAME   CHARGE
-                    example:
-                        ACE   H1    0.112300
-                        ACE   CH3  -0.366200
-                        ...
-                        PC    O22  -0.596900
-                    Additional columns are ignored.
-        """
+        traj: pt.TrajectoryIterator,
+        mask: str,
+        cutoff: float,
+        frames: Optional[np.ndarray] = None,
+        turnoff_mask: Optional[str] = None,
+        charges_db: Optional[str] = None,
+        remove_mean: Optional[bool] = False,
+        read_alphas: Optional[bool] = True,
+    ) -> None:
         self.traj = traj
         self.top = self.traj.top
         self.qm_mask = mask
@@ -673,11 +807,31 @@ class MMElectrostaticPotential(object):
 
     def electrostatic_potential(
         self,
-        coords1,
-        coords2,
-        charges2,
-        residues_array,
-    ):
+        coords1: np.ndarray,
+        coords2: np.ndarray,
+        charges2: np.ndarray,
+        residues_array: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Computes the electrostatic potential for a single frame.
+
+        Arguments
+        ---------
+        coords1: np.ndarray
+            coordinates of the QM atoms
+        coords2: np.ndarray
+            coordinates of the MM atoms
+        charges2: np.ndarray
+            charges of the MM atoms
+        residues_array: np.ndarray
+            residues_array of the MM atoms
+            (see excipy.selection.get_residues_array)
+
+        Returns
+        -------
+        pot: np.ndarray
+            electrostatic potential on the QM atoms.
+        """
         _, coords2, mask, dd = whole_residues_cutoff(
             source_coords=coords1,
             ext_coords=coords2,
@@ -690,11 +844,30 @@ class MMElectrostaticPotential(object):
 
     def calc_elec_potential_along_traj(
         self,
-        qm_indices,
-        mm_indices,
-        mm_charges,
-        residues_array,
-    ):
+        qm_indices: np.ndarray,
+        mm_indices: np.ndarray,
+        mm_charges: np.ndarray,
+        residues_array: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Computes the electrostatic potential on the QM atoms along a trajectory.
+
+        Arguments
+        ---------
+        qm_indices: np.ndarray
+            indices of the QM atoms.
+        mm_indices: np.ndarray
+            indices of the MM atoms.
+        mm_charges: np.ndarray
+            charges of the MM atoms.
+        residues_array: np.ndarray
+            residues_array of the MM atoms (see excipy.selection.get_residues_array).
+
+        Returns
+        -------
+        pots: np.ndarray
+            electrostatic potentials computed along the trajectory.
+        """
         potentials = []
         total = self.traj.n_frames if self.frames is None else len(self.frames)
 
@@ -723,7 +896,20 @@ class MMElectrostaticPotential(object):
 
         return potentials
 
-    def get_charges(self, indices):
+    def get_charges(self, indices: np.ndarray) -> np.ndarray:
+        """
+        Gets the charges for the MM part
+
+        Arguments
+        ---------
+        indices: np.ndarray
+            indices of the atoms of the MM part.
+
+        Returns
+        -------
+        charges: np.ndarray
+            charges of the MM part.
+        """
         charges, _, _ = read_electrostatics(
             top=self.top,
             db=self.charges_db,
@@ -746,4 +932,5 @@ class MMElectrostaticPotential(object):
         )
 
     def encode(self):
+        "Encode the molecular geometry as the MM Electrostatic Potential"
         return self._encode()

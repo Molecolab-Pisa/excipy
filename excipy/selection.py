@@ -13,6 +13,16 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+#######
+Summary
+#######
+Module containing functions to select parts of the MM subsystem based
+on some cutoff radius from the QM part, and in general functions to
+select part of a subsystem based on some criterion.
+It also contains some geometric functions, like squared_distances to
+compute the squared euclidean distances.
+"""
 from __future__ import annotations
 from typing import Tuple, List, Optional
 
@@ -46,11 +56,16 @@ def squared_distances(x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
 
     Note: this function evaluates distances between batches of points
 
-    Args:
-        x1: first set of points, (n_samples1, n_feats)
-        x2: second set of points, (n_samples2, n_feats)
-    Returns:
-        dist: squared distances between x1 and x2
+    Arguments
+    ---------
+    x1: np.ndarray
+        first set of points, (n_samples1, n_feats)
+    x2: np.ndarray
+        second set of points, (n_samples2, n_feats)
+    Returns
+    -------
+    dist: np.ndarray
+        distances between x1 and x2
     """
     jitter = 1e-12
     x1s = np.sum(np.square(x1), axis=-1)
@@ -64,6 +79,17 @@ def euclidean_distances(x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
 
     Memory efficient and fast implementation of the calculation
     of squared euclidean distances.
+
+    Arguments
+    ---------
+    x1: np.ndarray
+        first set of points, (n_samples1, n_feats)
+    x2: np.ndarray
+        second set of points, (n_samples2, n_feats)
+    Returns
+    -------
+    dist: np.ndarray
+        distances between x1 and x2
     """
     return np.maximum(squared_distances(x1=x1, x2=x2), 1e-300) ** 0.5
 
@@ -149,15 +175,23 @@ def apply_distance_cutoff(
     be retained given a list of pairs. The cutoff is applied on
     the geometric centers of the two pairs.
 
-    Args:
-        coords: list of atomic corodinates, each (num_frames, num_atoms, 3)
-        residue_ids: lsit of names of the residues (used for printing only)
-        pairs: list of indices of residues composing each pair, e.g.
-               [[0, 1], [2, 3] specifies pairs 0-1 and 2-3.
-        cutoff: pairs within the cutoff are included, others are excluded.
-    Returns:
-        pairs: list with the indices of the retained pairs, e.g.
-               [[0, 1]] if only residues 0-1 are within the cutoff.
+    Arguments
+    ---------
+    coords: list of np.ndarray
+        list of atomic coordinates, each (num_frames, num_atoms, 3)
+    residue_ids: list of str
+        list of names of the residues (used for printing only)
+    pairs: list of list of int
+        list of indices of residues composing each pair, e.g.
+        [[0, 1], [2, 3] specifies pairs 0-1 and 2-3.
+    cutoff: float
+        pairs within the cutoff are included, others are excluded.
+
+    Returns
+    -------
+    pairs: list of list of int
+        list with the indices of the retained pairs, e.g.
+        [[0, 1]] if only residues 0-1 are within the cutoff.
     """
     retain_list = compute_retain_list(
         coords, residue_ids, pairs, cutoff, verbose=verbose
@@ -179,9 +213,17 @@ def get_residues_array(topology: PytrajTopology, mm_indices: np.ndarray) -> np.n
     It is assumed that residues appear sequentially, i.e., there is no atom of
     residue j in the middle of atoms of residue i.
 
-    Args:
-        topology: pytraj topology
-        mm_indices: indices of the MM atoms
+    Arguments
+    ---------
+    topology: pt.Topology
+        pytraj topology
+    mm_indices: np.ndarray
+        indices of the MM atoms
+
+    Returns
+    -------
+    residues_array: np.ndarray
+        residues array
     """
     num_mm = np.array([len(mm_indices)])
     _, indices = np.unique(
@@ -232,11 +274,28 @@ def whole_residues_cutoff(
     Applies a given cutoff around the source atoms so that each
     external residue is taken as a whole.
 
-    Args:
-        ext_topology: pytraj topology of just the external part
-        source_coords: coordinates of the source part
-        ext_coords: coordinates of the external part
-        cutoff: cutoff for the external part
+    Arguments
+    ---------
+    source_coords: np.ndarray
+        coordinates of the source part
+    ext_coords: np.ndarray
+        coordinates of the external part
+    residues_array: np.ndarray
+        the residues array
+    cutoff: float
+        cutoff for the external part
+
+    Returns
+    -------
+    num_ext: int
+        number of selected external atoms
+    ext_coords: np.ndarray
+        coordinates of the selected external atoms
+    ext_idx: np.ndarray
+        indices of the selected external atoms
+    dist: np.ndarray
+        distances between the selected external atoms
+        and the source atoms
     """
     ext_idx = np.arange(ext_coords.shape[0])
     cut_mask = cut_box(source_coords, ext_coords, cutoff)
@@ -312,7 +371,7 @@ def _distances_diffmask(
     return dist
 
 
-def cut_topology(top: pt.Topology, idx: np.ndarray):
+def _cut_topology(top: pt.Topology, idx: np.ndarray):
     # amber mask counts from 1
     mask = "@" + ",".join((idx + 1).astype(str))
     return top[mask]
@@ -325,20 +384,32 @@ def spherical_cutoff(
 
     Applies a spherical cutoff around each source atoms.
     Residues of the external part may be truncated.
-    Note: the sphere is around each atom, i.e., the global
-          cut is not spherical.
 
-    Args:
-        source_coords: coordinates of the source part
-        ext_coords: coordinates of the external part
-        cutoff: cutoff for the external part
+    Note
+    ----
+    the sphere is around each atom, i.e., the global
+    cut is not spherical.
 
-    Returns:
-        num_ext: number of selected external atoms
-        ext_coords: coordinates of the selected external atoms
-        ext_idx: indices of the selected external atoms
-        dist: distances between the selected external atoms
-              and the source atoms
+    Parameters
+    ----------
+    source_coords: np.ndarray
+        coordinates of the source part
+    ext_coords: np.ndarray
+        coordinates of the external part
+    cutoff: float
+        cutoff for the external part
+
+    Returns
+    -------
+    num_ext: int
+        number of selected external atoms
+    ext_coords: np.ndarray
+        coordinates of the selected external atoms
+    ext_idx: np.ndarray
+        indices of the selected external atoms
+    dist: np.ndarray
+        distances between the selected external atoms
+        and the source atoms
     """
     ext_idx = np.arange(ext_coords.shape[0])
     cut_mask = cut_box(source_coords, ext_coords, cutoff)
@@ -393,7 +464,7 @@ def _whole_residues_mm_cutoff(
         residues_array=residues_array,
         cutoff=mm_cut,
     )
-    mm_top = cut_topology(top=mm_top, idx=mm_sel)
+    mm_top = _cut_topology(top=mm_top, idx=mm_sel)
 
     # indices in the original topology
     mm_idx = mm_idx[mm_sel]
@@ -438,5 +509,5 @@ def _whole_residues_pol_cutoff(
         residues_array=residues_array,
         cutoff=pol_cut,
     )
-    pol_top = cut_topology(top=mm_topology, idx=pol_idx)
+    pol_top = _cut_topology(top=mm_topology, idx=pol_idx)
     return pol_coords, pol_top, pol_idx
