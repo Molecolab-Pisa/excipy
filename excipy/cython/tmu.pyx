@@ -113,6 +113,7 @@ cdef double[:, ::1] _tmu(
 
     return E
 
+@cython.embedsignature(True)
 def tmu_cy(double[:,:] mu, double[:] alpha, double[:] thole, np.int64_t[:,:] nn_list, double[:,:] crd, int iscreen):
     """
     Computes E = T*mu, where T is the MMPol matrix (excluding the diagonal)

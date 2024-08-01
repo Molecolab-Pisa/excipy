@@ -78,6 +78,7 @@ cdef double[:,::1] _distances_diffmask(
 
     return dist
 
+@cython.embedsignature(True)
 def distances_diffmask_cy(double[:,:] source_coords, double[:,:] ext_coords, double[:,:] dist1, cut0_mask, cut1_mask, cut2_mask):
     """
     Computes only the missing distances in dist1 for external atoms

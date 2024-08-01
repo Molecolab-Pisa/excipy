@@ -20,6 +20,7 @@ DTYPE = np.intc
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
+@cython.embedsignature(True)
 def retain_full_residues_cy(int[:] idx, int[:] residues_array):
     '''
     Given an array `idx`, with 1 standing for `selected atom`
