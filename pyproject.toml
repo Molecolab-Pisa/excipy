@@ -2,5 +2,57 @@
 requires = ["setuptools", "wheel", "setuptools_scm[toml]", "Cython", "numpy"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "excipy"
+dynamic = ["version"]
+dependencies = [
+    "pytraj",
+    "numpy",
+    "scipy",
+    "tqdm",
+    "cython",
+]
+requires-python = ">= 3.7"
+authors = [
+    {name = "Edoardo Cignoni", email = "edoardo.cignoni96@gmail.com"},
+    {name = "Elena Betti", email = "elena15.be@gmail.com"},
+    {name = "Chris John"},
+    {name = "Lorenzo Cupellini", email = "lorenzo.cupellini@unipi.it"},
+    {name = "Benedetta Mennucci", email = "benedetta.mennucci@unipi.it"},
+]
+maintainers = [
+    {name = "Edoardo Cignoni"},
+    {name = "Elena Betti"},
+    {name = "Chris John"},
+]
+description = "Machine learning models for a fast estimation of excitonic Hamiltonians"
+readme = {file = "README.md", content-type = "text/markdown"}
+license = {file = "LICENSE"}
+keywords = ["Machine Learning", "Chlorophylls", "Excitonic", "Light-Harvesting"]
+
+[project.urls]
+Repository = "https://github.com/Molecolab-Pisa/excipy"
+
+# [project.entry_points]
+# excipy = "excipy.cli:main"
+# excipy2exat = "excipy.cli:excipy2exat"
+# excipy-scan = "excipy.cli:excipy_scan"
+
+[project.scripts]
+excipy = "excipy.cli:main"
+excipy2exat = "excipy.cli:excipy2exat"
+excipy-scan = "excipy.cli:excipy_scan"
+
 [tool.setuptools_scm]
 write_to = "excipy/_version.py"
+
+[tool.setuptools]
+packages = ["excipy", "excipy.clib", "excipy.models"]
+
+[tool.setuptools.package-data]
+excipy = [
+    "database/atom_names/*.json",
+    "database/parameters/*/*.json",
+    "database/rescalings/*/*.json",
+    "database/models/*/*/*.npz",
+]
